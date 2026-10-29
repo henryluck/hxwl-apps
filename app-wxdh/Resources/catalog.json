@@ -1,0 +1,269 @@
+{
+  "version": 1,
+  "categories": [
+    "全部",
+    "ins风",
+    "像素风",
+    "简约",
+    "可爱",
+    "文字",
+    "多巴胺",
+    "新中式"
+  ],
+  "themes": [
+    {
+      "id": "peach-bubble",
+      "name": "蜜桃气泡",
+      "style": "ins风",
+      "colors": [
+        "FFD1DC",
+        "FF9EBB"
+      ],
+      "symbol": "heart.fill",
+      "isPro": false,
+      "wallpapers": [
+        "Themes/peach-bubble/wallpaper-1.jpg",
+        "Themes/peach-bubble/wallpaper-2.jpg",
+        "Themes/peach-bubble/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "mint-soda",
+      "name": "薄荷苏打",
+      "style": "ins风",
+      "colors": [
+        "B5F1CC",
+        "5FD68A"
+      ],
+      "symbol": "leaf.fill",
+      "isPro": false,
+      "wallpapers": [
+        "Themes/mint-soda/wallpaper-1.jpg",
+        "Themes/mint-soda/wallpaper-2.jpg",
+        "Themes/mint-soda/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "pixel-street",
+      "name": "像素街区",
+      "style": "像素风",
+      "colors": [
+        "2D2A4A",
+        "6C5CE7"
+      ],
+      "symbol": "gamecontroller.fill",
+      "isPro": true,
+      "wallpapers": [
+        "Themes/pixel-street/wallpaper-1.jpg",
+        "Themes/pixel-street/wallpaper-2.jpg",
+        "Themes/pixel-street/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "neon-wave",
+      "name": "电音霓虹",
+      "style": "像素风",
+      "colors": [
+        "0F0C29",
+        "F000FF"
+      ],
+      "symbol": "bolt.fill",
+      "isPro": true,
+      "wallpapers": [
+        "Themes/neon-wave/wallpaper-1.jpg",
+        "Themes/neon-wave/wallpaper-2.jpg",
+        "Themes/neon-wave/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "cream-minimal",
+      "name": "奶油极简",
+      "style": "简约",
+      "colors": [
+        "FFF6E9",
+        "F5DCA0"
+      ],
+      "symbol": "circle.fill",
+      "isPro": false,
+      "wallpapers": [
+        "Themes/cream-minimal/wallpaper-1.jpg",
+        "Themes/cream-minimal/wallpaper-2.jpg",
+        "Themes/cream-minimal/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "fog-city",
+      "name": "雾灰都市",
+      "style": "简约",
+      "colors": [
+        "E8E8E8",
+        "9AA0A6"
+      ],
+      "symbol": "building.2.fill",
+      "isPro": false,
+      "wallpapers": [
+        "Themes/fog-city/wallpaper-1.jpg",
+        "Themes/fog-city/wallpaper-2.jpg",
+        "Themes/fog-city/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "bear-land",
+      "name": "熊熊乐园",
+      "style": "可爱",
+      "colors": [
+        "FFE0B5",
+        "FFAB73"
+      ],
+      "symbol": "pawprint.fill",
+      "isPro": true,
+      "wallpapers": [
+        "Themes/bear-land/wallpaper-1.jpg",
+        "Themes/bear-land/wallpaper-2.jpg",
+        "Themes/bear-land/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "cherry-bunny",
+      "name": "樱桃小兔",
+      "style": "可爱",
+      "colors": [
+        "FFC7EA",
+        "FF87C5"
+      ],
+      "symbol": "hare.fill",
+      "isPro": false,
+      "wallpapers": [
+        "Themes/cherry-bunny/wallpaper-1.jpg",
+        "Themes/cherry-bunny/wallpaper-2.jpg",
+        "Themes/cherry-bunny/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "lucky-text",
+      "name": "平安喜乐",
+      "style": "文字",
+      "colors": [
+        "FFF6E9",
+        "E8C39E"
+      ],
+      "symbol": "text.quote",
+      "isPro": false,
+      "wallpapers": [
+        "Themes/lucky-text/wallpaper-1.jpg",
+        "Themes/lucky-text/wallpaper-2.jpg",
+        "Themes/lucky-text/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "money-text",
+      "name": "暴富搞钱",
+      "style": "文字",
+      "colors": [
+        "FFE8D6",
+        "FFAB73"
+      ],
+      "symbol": "banknote.fill",
+      "isPro": true,
+      "wallpapers": [
+        "Themes/money-text/wallpaper-1.jpg",
+        "Themes/money-text/wallpaper-2.jpg",
+        "Themes/money-text/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "dopamine-rainbow",
+      "name": "多巴胺彩虹",
+      "style": "多巴胺",
+      "colors": [
+        "FFE3F0",
+        "B5EAEA"
+      ],
+      "symbol": "rainbow",
+      "isPro": false,
+      "wallpapers": [
+        "Themes/dopamine-rainbow/wallpaper-1.jpg",
+        "Themes/dopamine-rainbow/wallpaper-2.jpg",
+        "Themes/dopamine-rainbow/wallpaper-3.jpg"
+      ]
+    },
+    {
+      "id": "new-chinese-flower",
+      "name": "玉兰花鸟",
+      "style": "新中式",
+      "colors": [
+        "F5F0E6",
+        "A8C3A0"
+      ],
+      "symbol": "leaf.fill",
+      "isPro": true,
+      "wallpapers": [
+        "Themes/new-chinese-flower/wallpaper-1.jpg",
+        "Themes/new-chinese-flower/wallpaper-2.jpg",
+        "Themes/new-chinese-flower/wallpaper-3.jpg"
+      ]
+    }
+  ],
+  "widgets": [
+    {
+      "id": "battery-pill",
+      "name": "药丸电量",
+      "subtitle": "趣味看电新方式",
+      "kind": "battery",
+      "tint": "5FD68A",
+      "isPro": false
+    },
+    {
+      "id": "fish-tank",
+      "name": "鱼缸摸鱼",
+      "subtitle": "桌面养一条小鱼",
+      "kind": "fish",
+      "tint": "4A90D9",
+      "isPro": true,
+      "sprites": [
+        "Widgets/fish-tank/pose-1.png",
+        "Widgets/fish-tank/pose-2.png",
+        "Widgets/fish-tank/pose-3.png"
+      ]
+    },
+    {
+      "id": "pixel-cat",
+      "name": "像素猫猫",
+      "subtitle": "陪你一起摸鱼",
+      "kind": "pixelCat",
+      "tint": "2D2A4A",
+      "isPro": true,
+      "sprites": [
+        "Widgets/pixel-cat/pose-1.png",
+        "Widgets/pixel-cat/pose-2.png",
+        "Widgets/pixel-cat/pose-3.png",
+        "Widgets/pixel-cat/pose-4.png",
+        "Widgets/pixel-cat/pose-5.png"
+      ]
+    },
+    {
+      "id": "calendar-plan",
+      "name": "日历规划",
+      "subtitle": "日程一目了然",
+      "kind": "calendar",
+      "tint": "FF9EBB",
+      "isPro": false
+    },
+    {
+      "id": "steps-counter",
+      "name": "步数统计",
+      "subtitle": "运动打卡每一天",
+      "kind": "steps",
+      "tint": "FFAB73",
+      "isPro": false
+    },
+    {
+      "id": "minimal-clock",
+      "name": "极简时钟",
+      "subtitle": "高颜值桌面时钟",
+      "kind": "clock",
+      "tint": "9AA0A6",
+      "isPro": true
+    }
+  ]
+}

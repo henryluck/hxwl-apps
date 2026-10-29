@@ -1,0 +1,24 @@
+{
+  "id": "tech",
+  "name": "深空蓝",
+  "colors": {
+    "bgPage": "F5F6F8",
+    "surface": "FFFFFF",
+    "surfaceSecondary": "EEF0F4",
+    "border": "E5E7EC",
+    "primary": "2E6BFF",
+    "primaryLight": "9DB9FF",
+    "primaryDeep": "1F4FD1",
+    "primaryTint": "EBF1FF",
+    "danger": "F04438",
+    "textPrimary": "101828",
+    "textSecondary": "667085",
+    "textDisabled": "B0B7C3"
+  },
+  "radius": {
+    "small": 8,
+    "medium": 12,
+    "large": 14,
+    "extraLarge": 20
+  }
+}

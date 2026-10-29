@@ -1,0 +1,18 @@
+{
+  "id": "lavender",
+  "name": "清爽淡紫",
+  "colors": {
+    "bgPage": "FFFFFF",
+    "surface": "FAF9FD",
+    "surfaceSecondary": "F2EFFC",
+    "border": "EDEBF6",
+    "primary": "8F82ED",
+    "primaryLight": "C7BEFA",
+    "primaryDeep": "6C5CE7",
+    "primaryTint": "F2EFFC",
+    "danger": "FF6B6B",
+    "textPrimary": "201E33",
+    "textSecondary": "8B8D9E",
+    "textDisabled": "C7C6D6"
+  }
+}

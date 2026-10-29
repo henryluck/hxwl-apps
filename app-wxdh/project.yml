@@ -1,0 +1,60 @@
+name: FactoryCore
+options:
+  bundleIdPrefix: com.factory
+packages:
+  CoreKit:
+    path: Packages/CoreKit
+  Capabilities:
+    path: Packages/Capabilities
+  BaseComponents:
+    path: Packages/BaseComponents
+  NavKit:
+    path: Packages/NavKit
+targets:
+  FactoryCore:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - Sources
+      - path: Resources/spec.json
+      - path: Resources/catalog.json
+      - path: Resources/Themes
+        type: folder
+      - path: Resources/theme-packs
+        type: folder
+      - path: Resources/assets
+        type: folder
+      - path: Resources/Assets.xcassets
+    dependencies:
+      - package: CoreKit
+      - package: Capabilities
+      - package: BaseComponents
+      - package: NavKit
+    info:
+      path: FactoryCore-Info.plist
+      properties:
+        CFBundleDisplayName: "智能卫星导航"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSPhotoLibraryAddUsageDescription: 保存素材到你的相册
+        NSPhotoLibraryUsageDescription: 选择停车照片，仅保存在本机
+        NSLocationWhenInUseUsageDescription: 用于展示当前位置、搜索附近地点、规划路线与实时导航
+        UIBackgroundModes:
+          - location
+          - audio
+        NSSupportsLiveActivities: true
+    settings:
+      base:
+        SWIFT_OPTIMIZATION_LEVEL: '-Osize'
+        SWIFT_COMPILATION_MODE: 'wholemodule'
+        PRODUCT_BUNDLE_IDENTIFIER: com.hxwl.wxdh
+        PRODUCT_NAME: "智能卫星导航"
+        TARGETED_DEVICE_FAMILY: 1
+        SWIFT_VERSION: "5.9"
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

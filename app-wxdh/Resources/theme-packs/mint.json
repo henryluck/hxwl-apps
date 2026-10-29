@@ -1,0 +1,18 @@
+{
+  "id": "mint",
+  "name": "青绿导航",
+  "colors": {
+    "bgPage": "FFFFFF",
+    "surface": "FBFDFC",
+    "surfaceSecondary": "F2F6F4",
+    "border": "E6EFEA",
+    "primary": "087F5B",
+    "primaryLight": "2A9D8F",
+    "primaryDeep": "065C41",
+    "primaryTint": "EAF6F1",
+    "danger": "E5484D",
+    "textPrimary": "193E30",
+    "textSecondary": "6B8578",
+    "textDisabled": "B9C8C0"
+  }
+}
