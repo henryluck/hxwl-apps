@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.venv-local/
+.venv313/
+venv/
+.pytest_cache/
+.pytest_tmp/
+
+# Env / secrets
+.env
+.env.local
+
+# 意见反馈本地数据库
+data/
+*.db
+
+# IDE
+.vscode/
+.idea/
+
+# OMC / Claude runtime state
+.omc/
+.claude/
+.trae/
+.superpowers/
+.workbuddy-ai/
+
+# OS
+.DS_Store
+Thumbs.db
+keys/
