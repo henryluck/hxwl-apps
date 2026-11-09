@@ -1,0 +1,43 @@
+{
+  "_comment": "智能卫星导航（prdId 4115206）订阅页策略映射表。plans: 套餐→商品+文案（productId 必须与 App spec.json weekly_plans 一致；copy 可省略，客户端有模板兜底）。strategy_map: 天枢 strategyId→套餐代号（A=0元试用3天/B=5.8首周兜底/C=8首周/D=1.8首周）。改完即生效（服务端 mtime 自动重载），无需重启。上线顺序：先 ASC 建商品生效 → 北极星配 commodityId → 最后加映射。",
+  "default_plan": "B",
+  "plans": {
+    "A": {
+      "product_id": "com.hxwl.wxdh.weekly.offer",
+      "copy": {
+        "launch_price_line": "新人0元试用3天，之后¥58/周",
+        "card_title": "新人0元试用",
+        "card_desc": "试用3天，之后¥58/周自动续费",
+        "tag": "新人0元"
+      }
+    },
+    "B": {
+      "product_id": "com.hxwl.wxdh.weekly",
+      "copy": {
+        "launch_price_line": "新人优惠首周¥5.8，之后¥58/周",
+        "card_title": "新人优惠首周",
+        "card_desc": "之后¥58/周自动续费",
+        "tag": "新人优惠"
+      }
+    },
+    "C": {
+      "product_id": "com.hxwl.wxdh.weekly.deal",
+      "copy": {
+        "launch_price_line": "新人优惠首周¥8，之后¥48/周",
+        "card_title": "新人优惠首周",
+        "card_desc": "之后¥48/周自动续费",
+        "tag": "新人优惠"
+      }
+    },
+    "D": {
+      "product_id": "com.hxwl.wxdh.weekly.sale",
+      "copy": {
+        "launch_price_line": "新人优惠首周¥1.8，之后¥48/周",
+        "card_title": "新人优惠首周",
+        "card_desc": "之后¥48/周自动续费",
+        "tag": "新人优惠"
+      }
+    }
+  },
+  "strategy_map": {}
+}
