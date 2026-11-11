@@ -188,7 +188,7 @@ public struct ProtoPaywallView: View {
                 }
                 Text(isFirstPurchase
                      ? "新人首周特惠¥\(introAmount)，之后¥\(renewAmount)/周，支持随时取消"
-                     : "新人首周特惠¥\(introAmount)，之后¥\(renewAmount)/周，支持随时取消")
+                     : "续期¥\(renewAmount)/周，自动续费，支持随时取消")
                     .font(.system(size: 12))
                     .foregroundStyle(subGray)
             }
@@ -290,6 +290,7 @@ public struct ProtoPaywallView: View {
         }
         .padding(.leading, 18)
         .padding(.top, 14)
+        .accessibilityIdentifier("paywall.nav.back")
     }
 
     private var restoreButton: some View {

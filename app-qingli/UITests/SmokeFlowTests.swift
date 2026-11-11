@@ -34,10 +34,11 @@ final class SmokeFlowTests: XCTestCase {
         sleep(1)
         attach(app, "02-引导页1")
 
-        // 3. 逐页推进：每点一次截图验证，直到订阅墙出现（容忍淡出期吃掉的点击）
-        let welcome = app.staticTexts["解锁全部会员内容"]
-        let unlock = app.buttons["立即解锁权益"]
-        var reachedPaywall = welcome.exists || unlock.exists
+        // 3. 逐页推进：每点一次截图验证，直到原型版订阅墙真正出现（容忍淡出期吃掉的点击）。
+        // 注意：引导页的继续按钮文案也是「下一步」，绝不能用它判断是否到达订阅墙；
+        // 唯一判据是订阅墙独有的「会员权益」大标题（ProtoPaywallView）。
+        let welcome = app.staticTexts["会员权益"]
+        var reachedPaywall = welcome.exists
         var page = 1
         var taps = 0
         while !reachedPaywall && taps < 8 {
@@ -46,7 +47,7 @@ final class SmokeFlowTests: XCTestCase {
             btn.tap()
             taps += 1
             sleep(2)
-            reachedPaywall = welcome.exists || unlock.exists
+            reachedPaywall = welcome.exists
             if !reachedPaywall {
                 page += 1
                 attach(app, String(format: "03-引导页%d(第%d次点击后)", page, taps))
@@ -55,28 +56,37 @@ final class SmokeFlowTests: XCTestCase {
         XCTAssertTrue(reachedPaywall, "点了 \(taps) 次仍未进入订阅墙（引导页没走完）")
         attach(app, "04-订阅墙")
 
-        // 4. 关闭订阅墙（左上角 ✕ 无文本标签，按坐标点）
-        let size = app.frame.size
-        app.coordinate(withNormalizedOffset: CGVector(dx: 35.0 / size.width,
-                                                      dy: 80.0 / size.height)).tap()
-        sleep(3)
-        attach(app, "05-挽留页")
-
-        // 5. 挽留页「我再想想」→ 进主界面
-        let later = app.buttons["我再想想"]
-        if later.waitForExistence(timeout: 6) {
-            later.tap()
-            sleep(3)
+        // 4. 关闭订阅墙（左上角 ✕，优先用标识定位，坐标兜底）
+        if let close = app.buttons.allElementsBoundByIndex.first(where: {
+            $0.identifier == "paywall.nav.back"
+        }), close.isHittable {
+            close.tap()
+        } else {
+            let size = app.frame.size
+            app.coordinate(withNormalizedOffset: CGVector(dx: 35.0 / size.width,
+                                                          dy: 80.0 / size.height)).tap()
         }
+        sleep(3)
+        attach(app, "05-限时特惠")
+
+        // 5. 限时特惠悬浮卡「✕」（flashSale.close）→ 进主界面（旧的「我再想想」页已下线）
+        let flashClose = app.buttons["flashSale.close"]
+        if flashClose.waitForExistence(timeout: 5) {
+            flashClose.tap()
+        } else {
+            attach(app, "05b-限时特惠关闭按钮缺失")
+        }
+        sleep(3)
         attach(app, "06-主界面-首页")
 
-        let homeTab = app.tabBars.buttons["首页"]
-        XCTAssertTrue(homeTab.waitForExistence(timeout: 10), "主界面缺少首页 Tab")
+        // 主界面是自绘 ProtoTabBar（非系统 TabBar），用 tab.首页 标识定位
+        let homeTab = app.buttons["tab.首页"]
+        XCTAssertTrue(homeTab.waitForExistence(timeout: 10), "主界面缺少首页 Tab（自绘 TabBar）")
 
-        // 6. 切到「我的」
-        app.tabBars.buttons["我的"].tap()
+        // 6. 切到「个人中心」
+        app.buttons["tab.个人中心"].tap()
         sleep(2)
-        attach(app, "07-主界面-我的")
+        attach(app, "07-主界面-个人中心")
     }
 
     /// 轮询直到元素可命中（被覆盖层盖住时 isHittable = false）

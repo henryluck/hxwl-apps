@@ -232,11 +232,12 @@ public struct OnboardingFlow: View {
     public var body: some View {
         ZStack {
             if isPaywallPage {
-                // 最后一页：订阅页（内容来自中控台定义）
-                PaywallView(config: paywallConfig,
-                            theme: theme,
-                            pay: pay,
-                            onClose: onFinish)
+                // 最后一页：原型版订阅页（与个人中心「开通会员」进入的同一个 ProtoPaywallView，
+                // 首购/复购双态、新人特惠角标、恢复购买、协议入口全部一致；关闭即走完引导）
+                ProtoPaywallView(config: paywallConfig,
+                                 theme: theme,
+                                 pay: pay,
+                                 onClose: onFinish)
             } else {
                 pageView(pages[index])
                     .transition(.opacity)

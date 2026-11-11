@@ -10,9 +10,10 @@ final class ProtoScreenCaptureTests: XCTestCase {
     }
 
     @MainActor
-    private func launchApp(skipOnboarding: Bool = true) -> XCUIApplication {
+    private func launchApp(skipOnboarding: Bool = true,
+                           extraArgs: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-reset-onboarding", "-uitest-skip-onboarding"]
+        app.launchArguments = ["-uitest-reset-onboarding", "-uitest-skip-onboarding"] + extraArgs
         app.launch()
         // 系统照片权限弹窗（SpringBoard 层）兜底
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -89,6 +90,21 @@ final class ProtoScreenCaptureTests: XCTestCase {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.07, dy: 0.075)).tap()
             sleep(2)
             snap("proto_flash_sale")
+        }
+    }
+
+    /// 复购订阅页（原型《复购订阅页面》对照）：钩子强制无首期资格 → 显示 ¥48/周，无新人特惠角标
+    @MainActor
+    func testCapturePaywallRenewal() throws {
+        let app = launchApp(extraArgs: ["-uitest-force-renewal"])
+        openProfileTab(app)
+        sleep(1)
+        if app.buttons["开通会员"].waitForExistence(timeout: 4) {
+            app.buttons["开通会员"].tap()
+            sleep(2)
+            snap("proto_paywall_renewal")
+        } else {
+            snap("proto_paywall_renewal_button_missing")
         }
     }
 }

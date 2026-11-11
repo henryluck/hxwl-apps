@@ -133,7 +133,15 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
             let fetched = try await Product.products(for: ids)
             for p in fetched { products[p.id] = p }
             if fetched.isEmpty {
-                print("[Pay] ⚠️ 商品列表为空 —— StoreKit 配置未生效或商品ID不匹配")
+                // 首次拉取为空时延时重试一次：沙盒/弱网下启动即查常返回空，
+                // 数百 ms 后重试往往能拿到（ASC 商品未配置/协议未签时始终为空）
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                let retried = try await Product.products(for: ids)
+                for p in retried { products[p.id] = p }
+                if retried.isEmpty {
+                    print("[Pay] ⚠️ 商品列表仍为空 —— 依次排查：①ASC「付费App协议」未签/未生效 ②商品(com.hxwl.qlzs.weekly / .weekly.sale)未创建或缺元数据(名称/价格/审核截图) ③商品ID与bundle不匹配 ④真机未登录沙盒账号/网络不通")
+                    print("[Pay]    storefront=\(storefrontCountryCode ?? "nil(未取到)") ids=\(ids)")
+                }
             }
         } catch {
             print("[Pay] ❌ loadProducts error: \(error)")
@@ -149,6 +157,12 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
     /// 本地订阅历史优先：有历史（含已到期）按「每组一次首期优惠」规则必然无资格，
     /// 规避沙盒 isEligibleForIntroOffer 误报 true 导致老用户看到首期价。
     private func refreshIntroEligibility() async {
+        // UI 测试/截屏钩子：-uitest-force-renewal 强制按复购态（无首期资格）展示，
+        // 用于截取《复购订阅页面》原型对照，不影响真实用户逻辑
+        if ProcessInfo.processInfo.arguments.contains("-uitest-force-renewal") {
+            isIntroEligible = false
+            return
+        }
         if hasSubscriptionHistory {
             isIntroEligible = false
             return
@@ -182,6 +196,7 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
             await loadProducts()
         }
         guard let product = products[productID] else {
+            print("[Pay] ❌ purchase(productID:\(productID)) 商品不存在；已加载=\(products.keys.joined(separator: ",")) storefront=\(storefrontCountryCode ?? "nil")")
             throw PayError.productNotFound
         }
         let result: Product.PurchaseResult
