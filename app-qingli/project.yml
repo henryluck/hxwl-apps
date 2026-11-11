@@ -1,0 +1,111 @@
+name: FactoryCore
+options:
+  bundleIdPrefix: com.factory
+packages:
+  CoreKit:
+    path: Packages/CoreKit
+  Capabilities:
+    path: Packages/Capabilities
+  BaseComponents:
+    path: Packages/BaseComponents
+  CleanKit:
+    path: Packages/CleanKit
+  CrashBugly:
+    path: Packages/Integrations/CrashBugly
+targets:
+  FactoryCore:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - Sources
+      - path: Resources/spec.json
+      - path: Resources/catalog.json
+      - path: Resources/Themes
+        type: folder
+      - path: Resources/theme-packs
+        type: folder
+      - path: Resources/assets
+        type: folder
+      - path: Resources/Assets.xcassets
+    dependencies:
+      - package: CoreKit
+      - package: Capabilities
+      - package: BaseComponents
+      - package: CleanKit
+      - package: CrashBugly
+    info:
+      path: FactoryCore-Info.plist
+      properties:
+        CFBundleDisplayName: "垃圾清理助手"
+        # 版本以 settings.MARKETING_VERSION / CURRENT_PROJECT_VERSION 为准（变量展开）
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSPhotoLibraryAddUsageDescription: 保存素材到你的相册
+        NSPhotoLibraryUsageDescription: 扫描相似照片、截图与模糊照片，帮你清理手机空间
+        NSSupportsLiveActivities: true
+    settings:
+      base:
+        SWIFT_OPTIMIZATION_LEVEL: '-Onone'
+        SWIFT_COMPILATION_MODE: 'wholemodule'
+        PRODUCT_BUNDLE_IDENTIFIER: com.hxwl.qlzs
+        PRODUCT_NAME: "垃圾清理助手"
+        TARGETED_DEVICE_FAMILY: 1
+        SWIFT_VERSION: "5.9"
+        MARKETING_VERSION: "1.1.6"
+        CURRENT_PROJECT_VERSION: "35"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    # 保险 1（最可靠，不依赖 scheme 缓存）：Release 构建时直接把 Bugly 空壳 dylib 的
+    # dSYM 产到 DWARF_DSYM_FOLDER_PATH，Xcode 归档阶段会把该目录下所有 .dSYM 一起收进
+    # archive/dSYMs/。GUI（Product > Archive）与命令行归档都生效。
+    postBuildScripts:
+      - name: 补齐 Bugly 空壳 dSYM
+        script: |
+          if [ "${CONFIGURATION:-}" != "Release" ]; then exit 0; fi
+          [ -n "${DWARF_DSYM_FOLDER_PATH:-}" ] || exit 0
+          FW="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Bugly.framework/Bugly"
+          [ -f "$FW" ] || exit 0
+          OUT="${DWARF_DSYM_FOLDER_PATH}/Bugly.framework.dSYM"
+          rm -rf "$OUT"
+          dsymutil "$FW" -o "$OUT" || true
+          echo "[dsym] Bugly.framework.dSYM: $(dwarfdump --uuid "$OUT" 2>/dev/null | awk 'NR==1{print $2}')"
+# 共享 scheme：GUI 归档后自动补齐第三方 SDK dSYM（Bugly 空壳 dylib 无调试段，
+# dsymutil 不会为它产 dSYM，App Store 上传会报 "did not include a dSYM"）
+schemes:
+  FactoryCore:
+    build:
+      targets:
+        FactoryCore: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+# 保险 2：archive postAction 再做一次兜底。脚本自包含、不引用工程内文件
+# （旧版用 ${BUILD_ROOT}/../../.. 推项目路径，实际指到 DerivedData，永远找不到脚本，
+#  这正是每次重新归档都复发的原因）。
+      postActions:
+        - script: |
+            A="${ARCHIVE_PATH:-}"
+            [ -d "$A" ] || { echo "[dsym] ARCHIVE_PATH 无效: $A"; exit 0; }
+            APP=$(find "$A/Products/Applications" -maxdepth 1 -type d -name "*.app" | head -1)
+            [ -n "$APP" ] || exit 0
+            D="$A/dSYMs"
+            mkdir -p "$D"
+            HAVE=$(find "$D" -name "*.dSYM" -exec dwarfdump --uuid {} \; 2>/dev/null | awk '{print $2}')
+            for FW in "$APP/Frameworks/"*.framework; do
+              [ -d "$FW" ] || continue
+              N=$(basename "$FW" .framework)
+              [ -f "$FW/$N" ] || continue
+              U=$(dwarfdump --uuid "$FW/$N" 2>/dev/null | awk 'NR==1{print $2}')
+              [ -n "$U" ] || continue
+              echo "$HAVE" | grep -q "$U" && { echo "[dsym] 已覆盖 $N ($U)"; continue; }
+              rm -rf "$D/$N.framework.dSYM"
+              dsymutil "$FW/$N" -o "$D/$N.framework.dSYM" >/dev/null 2>&1 || true
+              echo "[dsym] 补齐 $N.framework.dSYM ($U)"
+            done
+            echo "[dsym] 归档 dSYMs: $(ls -1 "$D" | tr '\n' ' ')"
+          name: 补齐第三方 SDK dSYM
+          settingsTarget: FactoryCore

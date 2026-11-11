@@ -1,0 +1,86 @@
+# 集成适配注册表 —— 第三方能力的厂家×版本可选清单
+#
+# factory.py 装配 和 clone 二次装配 共用这一份数据源。
+# 厂家实现是独立适配包（Packages/Integrations/<包名>）。
+
+version: 2
+
+# ── 埋点 analytics ──────────────────────────────
+analytics:
+  - provider: sensors
+    version: "5.0.8"
+    package: AnalyticsSensors
+    access: spm
+    config_fields: [serverURL, token]
+    notes: 神策，国内主流，私有化部署，数据可自管
+
+  - provider: mixpanel
+    version: "6.5.1"
+    package: AnalyticsMixpanel
+    access: spm
+    config_fields: [token]
+    notes: Mixpanel，海外服务，SPM 最成熟，指纹差异大
+
+  - provider: growingio
+    version: "4.12.0"
+    package: AnalyticsGrowingIO
+    access: spm
+    config_fields: [projectId, urlScheme]
+    notes: GrowingIO，国内厂商，SPM 支持
+
+  - provider: umeng
+    version: "9.x"
+    package: AnalyticsUmeng
+    access: framework
+    limited: true
+    config_fields: [appKey]
+    notes: 友盟，不支持 SPM，framework + OC 桥接，限定级
+
+# ── 推送 push ───────────────────────────────────
+push:
+  - provider: jpush
+    version: "6.0.0"
+    package: PushJPushV6
+    access: spm
+    requires_capabilities: [Push Notifications, Background Modes]
+    config_fields: [appKey, channel]
+    notes: 极光 V6，国内主流，SPM 支持
+
+  - provider: getui
+    version: "3.1.0.0"
+    package: PushGeTui
+    access: spm
+    requires_capabilities: [Push Notifications]
+    config_fields: [appId, appKey, appSecret]
+    notes: 个推，国内主流，SPM 支持
+
+  - provider: onesignal
+    version: "5.2.14"
+    package: PushOneSignal
+    access: spm
+    requires_capabilities: [Push Notifications]
+    config_fields: [appId]
+    notes: OneSignal，海外，SPM 支持，APNs 通道可用
+
+# ── 崩溃 crash ──────────────────────────────────
+crash:
+  - provider: sentry
+    version: "8.58.2"
+    package: CrashSentry
+    access: spm
+    config_fields: [dsn]
+    notes: Sentry v8.x，免费计划够用，可关 APM 只要崩溃
+
+  - provider: firebase
+    version: "11.10.0"
+    package: CrashFirebase
+    access: spm
+    config_fields: []
+    notes: Firebase Crashlytics，需先 configure() + GoogleService-Info.plist
+
+  - provider: bugly
+    version: "2.6.1"
+    package: CrashBugly
+    access: framework
+    config_fields: [appId, appKey]
+    notes: Bugly，腾讯国内最稳，不支持 SPM 待封装

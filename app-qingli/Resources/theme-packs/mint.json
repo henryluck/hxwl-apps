@@ -1,0 +1,18 @@
+{
+  "id": "mint",
+  "name": "活力薄荷",
+  "colors": {
+    "bgPage": "F3FBF5",
+    "surface": "FFFFFF",
+    "surfaceSecondary": "EDF7EF",
+    "border": "E4F0E6",
+    "primary": "5BC265",
+    "primaryLight": "8DE3AC",
+    "primaryDeep": "3DA24E",
+    "primaryTint": "EAF7EC",
+    "danger": "E8635A",
+    "textPrimary": "1A1A1A",
+    "textSecondary": "6B7078",
+    "textDisabled": "B8BCC4"
+  }
+}

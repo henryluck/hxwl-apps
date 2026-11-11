@@ -1,0 +1,82 @@
+# 模拟器验证工程（仅供本机跑 UI / 走流程，不用于出包）
+#
+# 与 project.yml 的唯一差异：不引用 CrashBugly。
+# 原因：Bugly.xcframework 只含 ios-arm64（真机）与 ios-x86_64-simulator 两个 slice，
+#      而 Xcode 26 的 iOS 26 模拟器运行时只有 arm64，装不了 x86_64 包，也没有 arm64-sim slice，
+#      故模拟器构建改为 arm64 + 摘掉 Bugly。FactoryApp 里 #if canImport(CrashBugly) 自动回落
+#      ConsoleCrashReporter，业务代码零改动。
+#
+# 用法：
+#   xcodegen generate --spec project-simulator.yml
+#   xcodebuild -project FactoryCoreSim.xcodeproj -scheme FactoryCoreSim \
+#     -configuration Debug -sdk iphonesimulator -arch arm64 build
+name: FactoryCoreSim
+options:
+  bundleIdPrefix: com.factory
+packages:
+  CoreKit:
+    path: Packages/CoreKit
+  Capabilities:
+    path: Packages/Capabilities
+  BaseComponents:
+    path: Packages/BaseComponents
+  CleanKit:
+    path: Packages/CleanKit
+targets:
+  FactoryCoreSim:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - Sources
+      - path: Resources/spec.json
+      - path: Resources/catalog.json
+      - path: Resources/Themes
+        type: folder
+      - path: Resources/theme-packs
+        type: folder
+      - path: Resources/assets
+        type: folder
+      - path: Resources/Assets.xcassets
+    dependencies:
+      - package: CoreKit
+      - package: Capabilities
+      - package: BaseComponents
+      - package: CleanKit
+    info:
+      path: FactoryCoreSim-Info.plist
+      properties:
+        CFBundleDisplayName: "垃圾清理助手"
+        # 版本以 settings.MARKETING_VERSION / CURRENT_PROJECT_VERSION 为准（变量展开）
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSPhotoLibraryAddUsageDescription: 保存素材到你的相册
+        NSPhotoLibraryUsageDescription: 扫描相似照片、截图与模糊照片，帮你清理手机空间
+        NSSupportsLiveActivities: true
+    settings:
+      base:
+        SWIFT_OPTIMIZATION_LEVEL: '-Onone'
+        SWIFT_COMPILATION_MODE: 'wholemodule'
+        PRODUCT_BUNDLE_IDENTIFIER: com.hxwl.qlzs
+        PRODUCT_NAME: "垃圾清理助手"
+        TARGETED_DEVICE_FAMILY: 1
+        SWIFT_VERSION: "5.9"
+        MARKETING_VERSION: "1.1.6"
+        CURRENT_PROJECT_VERSION: "35"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  FactoryCoreSimUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - UITests
+    dependencies:
+      - target: FactoryCoreSim
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: FactoryCoreSim
+        PRODUCT_BUNDLE_IDENTIFIER: com.hxwl.qlzs.uitests

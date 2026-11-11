@@ -1,0 +1,203 @@
+{
+  "identifier" : "1000000000",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "¥188",
+      "familyShareable" : false,
+      "internalID" : "1000000001",
+      "localizations" : [
+        {
+          "description" : "一次购买，永久解锁全部高级功能",
+          "displayName" : "终身会员",
+          "locale" : "zh_CN"
+        }
+      ],
+      "price" : 188,
+      "productID" : "com.hxwl.wxdh.unlimited",
+      "referenceName" : "终身会员",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "1000000000",
+    "_developerTeamID" : "",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "zh_CN",
+    "_storefront" : "CHN"
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "2000000001",
+      "localizations" : [
+        {
+          "description" : "",
+          "displayName" : "周会员",
+          "locale" : "zh_CN"
+        }
+      ],
+      "name" : "周会员 B · 默认",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "¥58",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "1000000011",
+          "introductoryOffer" : {
+            "displayPrice" : "¥5.8",
+            "internalID" : "1000000012",
+            "paymentMode" : "payUpFront",
+            "price" : 5.8,
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "首周 5.8，之后 ¥58/周自动续费",
+              "displayName" : "周订阅默认会员",
+              "locale" : "zh_CN"
+            }
+          ],
+          "price" : 58,
+          "productID" : "com.hxwl.wxdh.weekly",
+          "recurringSubscriptionPeriod" : "P1W",
+          "referenceName" : "周订阅 5.8/58（默认）",
+          "subscriptionGroupID" : "2000000001",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : []
+        }
+      ]
+    },
+    {
+      "id" : "2000000002",
+      "localizations" : [
+        {
+          "description" : "",
+          "displayName" : "周会员",
+          "locale" : "zh_CN"
+        }
+      ],
+      "name" : "周会员 D · sale",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "¥48",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "1000000021",
+          "introductoryOffer" : {
+            "displayPrice" : "¥1.8",
+            "internalID" : "1000000022",
+            "paymentMode" : "payUpFront",
+            "price" : 1.8,
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "首周 1.8，之后 ¥48/周自动续费",
+              "displayName" : "周订阅优惠",
+              "locale" : "zh_CN"
+            }
+          ],
+          "price" : 48,
+          "productID" : "com.hxwl.wxdh.weekly.sale",
+          "recurringSubscriptionPeriod" : "P1W",
+          "referenceName" : "周订阅 1.8/48",
+          "subscriptionGroupID" : "2000000002",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : []
+        }
+      ]
+    },
+    {
+      "id" : "2000000003",
+      "localizations" : [
+        {
+          "description" : "",
+          "displayName" : "周会员",
+          "locale" : "zh_CN"
+        }
+      ],
+      "name" : "周会员 C · deal",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "¥48",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "1000000031",
+          "introductoryOffer" : {
+            "displayPrice" : "¥8",
+            "internalID" : "1000000032",
+            "paymentMode" : "payUpFront",
+            "price" : 8,
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "首周 8，之后 ¥48/周自动续费",
+              "displayName" : "周订阅特惠",
+              "locale" : "zh_CN"
+            }
+          ],
+          "price" : 48,
+          "productID" : "com.hxwl.wxdh.weekly.deal",
+          "recurringSubscriptionPeriod" : "P1W",
+          "referenceName" : "周订阅 8/48",
+          "subscriptionGroupID" : "2000000003",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : []
+        }
+      ]
+    },
+    {
+      "id" : "2000000004",
+      "localizations" : [
+        {
+          "description" : "",
+          "displayName" : "周会员",
+          "locale" : "zh_CN"
+        }
+      ],
+      "name" : "周会员 A · offer",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "¥58",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "1000000041",
+          "introductoryOffer" : {
+            "displayPrice" : "¥0",
+            "internalID" : "1000000042",
+            "paymentMode" : "free",
+            "price" : 0,
+            "subscriptionPeriod" : "P3D"
+          },
+          "localizations" : [
+            {
+              "description" : "免费试用 3 天，之后 ¥58/周自动续费",
+              "displayName" : "周订阅试用",
+              "locale" : "zh_CN"
+            }
+          ],
+          "price" : 58,
+          "productID" : "com.hxwl.wxdh.weekly.offer",
+          "recurringSubscriptionPeriod" : "P1W",
+          "referenceName" : "周订阅 0/58（3 天免费试用）",
+          "subscriptionGroupID" : "2000000004",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : []
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

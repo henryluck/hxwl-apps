@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "1430"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES">
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E2DBB0BE28C64DCF66C159CB"
+               BuildableName = "&#x5783;&#x573e;&#x6e05;&#x7406;&#x52a9;&#x624b;.app"
+               BlueprintName = "FactoryCore"
+               ReferencedContainer = "container:FactoryCore.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "E2DBB0BE28C64DCF66C159CB"
+            BuildableName = "&#x5783;&#x573e;&#x6e05;&#x7406;&#x52a9;&#x624b;.app"
+            BlueprintName = "FactoryCore"
+            ReferencedContainer = "container:FactoryCore.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
+      <Testables>
+      </Testables>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "E2DBB0BE28C64DCF66C159CB"
+            BuildableName = "&#x5783;&#x573e;&#x6e05;&#x7406;&#x52a9;&#x624b;.app"
+            BlueprintName = "FactoryCore"
+            ReferencedContainer = "container:FactoryCore.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "E2DBB0BE28C64DCF66C159CB"
+            BuildableName = "&#x5783;&#x573e;&#x6e05;&#x7406;&#x52a9;&#x624b;.app"
+            BlueprintName = "FactoryCore"
+            ReferencedContainer = "container:FactoryCore.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+      <PostActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "&#x8865;&#x9f50;&#x7b2c;&#x4e09;&#x65b9; SDK dSYM"
+               scriptText = "A=&quot;${ARCHIVE_PATH:-}&quot;&#10;[ -d &quot;$A&quot; ] || { echo &quot;[dsym] ARCHIVE_PATH &#x65e0;&#x6548;: $A&quot;; exit 0; }&#10;APP=$(find &quot;$A/Products/Applications&quot; -maxdepth 1 -type d -name &quot;*.app&quot; | head -1)&#10;[ -n &quot;$APP&quot; ] || exit 0&#10;D=&quot;$A/dSYMs&quot;&#10;mkdir -p &quot;$D&quot;&#10;HAVE=$(find &quot;$D&quot; -name &quot;*.dSYM&quot; -exec dwarfdump --uuid {} \; 2&gt;/dev/null | awk &apos;{print $2}&apos;)&#10;for FW in &quot;$APP/Frameworks/&quot;*.framework; do&#10;  [ -d &quot;$FW&quot; ] || continue&#10;  N=$(basename &quot;$FW&quot; .framework)&#10;  [ -f &quot;$FW/$N&quot; ] || continue&#10;  U=$(dwarfdump --uuid &quot;$FW/$N&quot; 2&gt;/dev/null | awk &apos;NR==1{print $2}&apos;)&#10;  [ -n &quot;$U&quot; ] || continue&#10;  echo &quot;$HAVE&quot; | grep -q &quot;$U&quot; &amp;&amp; { echo &quot;[dsym] &#x5df2;&#x8986;&#x76d6; $N ($U)&quot;; continue; }&#10;  rm -rf &quot;$D/$N.framework.dSYM&quot;&#10;  dsymutil &quot;$FW/$N&quot; -o &quot;$D/$N.framework.dSYM&quot; &gt;/dev/null 2&gt;&amp;1 || true&#10;  echo &quot;[dsym] &#x8865;&#x9f50; $N.framework.dSYM ($U)&quot;&#10;done&#10;echo &quot;[dsym] &#x5f52;&#x6863; dSYMs: $(ls -1 &quot;$D&quot; | tr &apos;\n&apos; &apos; &apos;)&quot;&#10;">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "E2DBB0BE28C64DCF66C159CB"
+                     BuildableName = "&#x5783;&#x573e;&#x6e05;&#x7406;&#x52a9;&#x624b;.app"
+                     BlueprintName = "FactoryCore"
+                     ReferencedContainer = "container:FactoryCore.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PostActions>
+   </ArchiveAction>
+</Scheme>

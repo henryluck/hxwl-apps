@@ -1,0 +1,147 @@
+{
+  "revision": 1793263885,
+  "identity": {
+    "id": "qnsjgj",
+    "name": "垃圾清理助手",
+    "bundle_id": "com.hxwl.qlzs",
+    "version": "1.1.6",
+    "build": 35
+  },
+  "brand": {
+    "accent": "2A9D8F",
+    "plus_name": "Plus",
+    "theme_pack": "mint"
+  },
+  "plugins": [
+    {
+      "id": "clean_kit",
+      "config": {}
+    },
+    {
+      "id": "toolbox_kit",
+      "config": {}
+    }
+  ],
+  "content": {
+    "catalog": "bundle",
+    "vertical": "",
+    "themes": [],
+    "asset_recipe": null
+  },
+  "onboarding": {
+    "splash": "assets/splash.png",
+    "splash_video": "assets/splash.mp4",
+    "pages": [
+      "assets/guide-1.png",
+      "assets/guide-2.png",
+      "assets/guide-3.png"
+    ],
+    "paywall_bg": "assets/paywall-bg.png",
+    "continue_label": "下一步"
+  },
+  "integrations": {
+    "zhongtai": {
+      "env": "prod",
+      "aesIv": "",
+      "prdId": "4115205",
+      "aesKey": "",
+      "baseURL": "https://open-api.yingzhongshare.com",
+      "channel": 61
+    },
+    "analytics": {
+      "provider": "__none__",
+      "config": {},
+      "verified": false,
+      "tested_at": ""
+    },
+    "push": {
+      "provider": "__none__",
+      "config": {
+        "appKey": "f566c32dcd4dd2d58fd65160",
+        "channel": " App Store"
+      },
+      "verified": false,
+      "tested_at": ""
+    },
+    "crash": {
+      "provider": "bugly",
+      "config": {
+        "appId": "0f979cd8e0",
+        "appKey": "592d19a6-0888-4db5-bfcc-3faa8d95cb3c"
+      },
+      "verified": false,
+      "tested_at": ""
+    }
+  },
+  "monetization": {
+    "strategy": "intro_price",
+    "weekly_intro": 8,
+    "weekly_renew": 48,
+    "trial_days": 3,
+    "product_id": "com.hxwl.qlzs.weekly",
+    "retention_enabled": true,
+    "retention_price": 1,
+    "retention_product_id": "com.hxwl.qlzs.weekly.sale",
+    "paywall_copy": {
+      "welcome": "解锁全部会员内容",
+      "features": [
+        "全部内容",
+        "专属功能",
+        "无广告",
+        "持续更新"
+      ]
+    }
+  },
+  "compliance": {
+    "legal": {
+      "privacy": {
+        "source": "template",
+        "html": "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>隐私政策 - 垃圾清理助手</title>\n<style>\n  body { margin:0; font-family:-apple-system,\"PingFang SC\",sans-serif; background:#f6f7f9; color:#222; line-height:1.75; }\n  main { max-width:760px; margin:0 auto; padding:28px 20px 60px; background:#fff; min-height:100vh; }\n  h1 { font-size:22px; } h2 { font-size:16px; margin-top:28px; }\n  table { width:100%; border-collapse:collapse; font-size:14px; margin:10px 0; }\n  th,td { border:1px solid #dfe3ea; padding:8px 10px; text-align:left; vertical-align:top; }\n  th { background:#f2f4f8; }\n  .meta { color:#889; font-size:13px; }\n  .banner { background:#fdf3e3; color:#b9770e; font-size:13px; padding:8px 20px; text-align:center; }\n</style>\n</head>\n<body>\n<div class=\"banner\">本文档由模板自动生成，上架前需法务审核确认</div>\n<main>\n<!-- 本文档由模板自动生成，上架前需法务审核确认 -->\n<h1>垃圾清理助手隐私政策</h1>\n<p class=\"meta\">更新日期：2026-10-29　版本：</p>\n<p>【公司/主体名称待补充】（以下简称\"我们\"）非常重视用户的隐私与个人信息保护。本政策说明 垃圾清理助手（bundle id：com.hxwl.qlzs）在提供服务过程中如何收集、使用、存储和保护您的信息。请您在使用本产品前仔细阅读本政策。</p>\n\n<h2>一、我们收集的信息范围</h2>\n<ul>\n  <li><b>设备信息</b>：设备型号、操作系统版本、唯一设备标识符，用于兼容性适配与崩溃排查。</li>\n  <li><b>使用数据</b>：功能点击、页面浏览等行为数据，用于改进产品体验。</li>\n  <li><b>购买记录</b>：通过 App Store 完成的订阅交易状态（我们不接触您的支付账户信息）。</li>\n  <li><b>您主动提供的内容</b>：如反馈邮件中包含的联系方式。</li>\n  <li><b>相册访问</b>：仅在您使用\"保存壁纸到相册\"等功能且明确授权后访问，我们不读取、上传您的相册内容。</li>\n</ul>\n\n<h2>二、信息的使用方式</h2>\n<ul>\n  <li>提供、维护和改进本产品的核心功能；</li>\n  <li>完成会员订阅的权益发放与状态校验；</li>\n  <li>进行崩溃分析与质量改进；</li>\n  <li>在法律法规要求或司法机关依法要求时提供配合。</li>\n</ul>\n\n<h2>三、信息的存储</h2>\n<p>您的偏好设置等数据优先存储在您的设备本地；确需上传的数据将在加密传输后存储于安全服务器，保存期限以实现本政策目的所必需的最短时间为准，法律另有规定的除外。</p>\n\n<h2>四、第三方共享</h2>\n<p>我们不会向任何第三方出售您的个人信息。仅为实现核心功能所必需时，我们会接入第三方服务（详见《第三方 SDK 共享清单》），并要求其按照不低于本政策的标准保护您的信息。</p>\n\n<h2>五、您的权利</h2>\n<ul>\n  <li>您有权访问、更正、删除您的个人信息；</li>\n  <li>您有权撤回对相册等系统权限的授权（可在系统\"设置\"中操作，撤回后相关功能不可用但不影响其他功能）；</li>\n  <li>您有权注销使用并要求我们删除相关数据。</li>\n</ul>\n<p>行使上述权利可通过本政策末尾的联系方式与我们取得联系，我们将在 15 个工作日内响应。</p>\n\n<h2>六、未成年人保护</h2>\n<p>本产品面向 4+ 及以上用户。若您为未成年人，请在监护人陪同下使用本产品。我们不会故意收集未成年人的个人信息。</p>\n\n<h2>七、政策变更</h2>\n<p>本政策如发生变更，我们将在产品内以适当方式提示。变更后的政策自公布之日起生效，您继续使用本产品即视为接受变更后的政策。</p>\n\n<h2>八、联系我们</h2>\n<p>如对本政策有任何疑问、意见或建议，请联系我们：</p>\n<ul>\n  <li>主体：【公司/主体名称待补充】</li>\n  <li>邮箱：<a href=\"mailto:【联系邮箱待补充】\">【联系邮箱待补充】</a></li>\n</ul>\n<p class=\"meta\">（ICP 备案号待回填）</p>\n\n</main>\n</body>\n</html>\n"
+      },
+      "terms": {
+        "source": "template",
+        "html": "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>用户协议 - 垃圾清理助手</title>\n<style>\n  body { margin:0; font-family:-apple-system,\"PingFang SC\",sans-serif; background:#f6f7f9; color:#222; line-height:1.75; }\n  main { max-width:760px; margin:0 auto; padding:28px 20px 60px; background:#fff; min-height:100vh; }\n  h1 { font-size:22px; } h2 { font-size:16px; margin-top:28px; }\n  table { width:100%; border-collapse:collapse; font-size:14px; margin:10px 0; }\n  th,td { border:1px solid #dfe3ea; padding:8px 10px; text-align:left; vertical-align:top; }\n  th { background:#f2f4f8; }\n  .meta { color:#889; font-size:13px; }\n  .banner { background:#fdf3e3; color:#b9770e; font-size:13px; padding:8px 20px; text-align:center; }\n</style>\n</head>\n<body>\n<div class=\"banner\">本文档由模板自动生成，上架前需法务审核确认</div>\n<main>\n<!-- 本文档由模板自动生成，上架前需法务审核确认 -->\n<h1>垃圾清理助手用户协议</h1>\n<p class=\"meta\">更新日期：2026-10-29　版本：</p>\n<p>本协议由您与 【公司/主体名称待补充】（以下简称\"我们\"）就您使用 垃圾清理助手（以下简称\"本产品\"）所订立。请您仔细阅读本协议全部内容，您下载、安装或使用本产品即视为同意本协议。</p>\n\n<h2>一、服务内容</h2>\n<ul>\n  <li>本产品为您提供主题美化、桌面小组件等软件服务，具体功能以产品内实际提供为准；</li>\n  <li>部分功能与内容需开通 Plus 会员后方可使用；</li>\n  <li>我们有权根据运营需要对服务内容进行调整，并以适当方式通知您。</li>\n</ul>\n\n<h2>二、账号与使用规范</h2>\n<ul>\n  <li>您应通过合法渠道（App Store）获取本产品；</li>\n  <li>您不得对本产品进行反向工程、破解、篡改，不得利用本产品从事任何违法违规活动；</li>\n  <li>您不得侵犯本产品及相关内容的知识产权。</li>\n</ul>\n\n<h2>三、会员订阅服务</h2>\n<ul>\n  <li>Plus 会员为按周自动续费订阅：首期优惠价 8 元/周，此后按 48 元/周自动续费；</li>\n  <li>订阅通过您的 Apple ID 扣费，可在设备\"设置 → Apple ID → 订阅\"中管理或取消；</li>\n  <li>详细规则见《自动续费服务规则》，开通会员即视为同时同意该规则。</li>\n</ul>\n\n<h2>四、知识产权</h2>\n<p>本产品及其包含的软件、界面设计、主题素材、商标等知识产权归 【公司/主体名称待补充】 或相应权利人所有。未经书面许可，您不得以任何形式复制、传播或用于商业用途。您通过本产品下载的壁纸等素材仅限个人设备美化使用。</p>\n\n<h2>五、免责声明</h2>\n<ul>\n  <li>本产品按\"现状\"提供，我们不保证服务不间断或无错误；</li>\n  <li>因不可抗力、网络原因或第三方服务（含 App Store）异常导致的服务中断，我们不承担责任；</li>\n  <li>法律允许的最大范围内，我们对间接损失不承担责任。</li>\n</ul>\n\n<h2>六、协议变更与终止</h2>\n<p>我们有权根据法律法规及运营需要修订本协议，修订后以适当方式公布。若您不同意变更内容，可停止使用本产品；继续使用即视为接受变更。您严重违反本协议时，我们有权终止向您提供服务。</p>\n\n<h2>七、联系我们</h2>\n<p>如对本协议有任何疑问，请联系我们：<a href=\"mailto:【联系邮箱待补充】\">【联系邮箱待补充】</a></p>\n<p class=\"meta\">（ICP 备案号待回填）</p>\n\n</main>\n</body>\n</html>\n"
+      }
+    },
+    "support_email": "developer@gzhuanxiwl.com"
+  },
+  "listing": {},
+  "support": {
+    "feedback": {
+      "enabled": true,
+      "fields": [
+        {
+          "key": "content",
+          "label": "问题描述",
+          "kind": "text",
+          "required": true
+        },
+        {
+          "key": "contact",
+          "label": "联系方式",
+          "kind": "text",
+          "required": false
+        }
+      ]
+    },
+    "about": {
+      "enabled": true,
+      "intro": "我们致力于专注手机存储优化，AI 智能识别各类冗余垃圾，精准区分文件，防止误删，让手机更轻松。",
+      "features": [
+        "相似 / 模糊 / 截图智能识别",
+        "照片修复 · 抠图 · 压缩",
+        "Live Photo 转静态",
+        "缓存清理图文指引"
+      ],
+      "contact_email": "developer@gzhuanxiwl.com"
+    },
+    "faq": {
+      "enabled": false,
+      "items": []
+    },
+    "rate": {
+      "enabled": true,
+      "app_store_url": ""
+    }
+  }
+}
