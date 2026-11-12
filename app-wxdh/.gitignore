@@ -1,0 +1,15 @@
+# 构建产物
+DerivedData/
+dist/
+build/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+.build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 工作区运行时数据（非源码）
+.workbuddy-ai/
