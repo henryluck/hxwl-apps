@@ -67,7 +67,8 @@ python3 factory.py build-source --source .
 - ASC 后台需同时创建上述两个商品并随版本提交，否则沙盒下点购买会提示「商品信息未加载」
 
 调试入口：启动环境变量 `SIMCTL_CHILD_NAV_DEBUG_SCREEN=<home|nearby|plan|navigating|compass|altitude|weather>`、`SIMCTL_CHILD_NAV_DEBUG_UNLOCK=1`（仅 DEBUG 生效）。
-订阅页调试：`SIMCTL_CHILD_PAY_DEBUG_OPEN=1` 直接拉起订阅页；`SIMCTL_CHILD_PAY_DEBUG_VARIANT=startup|unlock` 指定变体（默认 unlock）；`SIMCTL_CHILD_PAY_DEBUG_ELIGIBILITY=available|unavailable|unknown` 固定首期资格（四场景截图用）；`SIMCTL_CHILD_ONBOARDING_DEBUG_PAGE=3` 直接落到引导第 4 页。
+订阅页调试：`SIMCTL_CHILD_PAY_DEBUG_OPEN=1` 直接拉起订阅页；`SIMCTL_CHILD_PAY_DEBUG_VARIANT=startup|unlock` 指定变体（默认 unlock）；`SIMCTL_CHILD_PAY_DEBUG_ELIGIBILITY=available|unavailable|unknown` 固定首期资格（四场景截图用）；`SIMCTL_CHILD_ONBOARDING_DEBUG_PAGE=3` 直接落到引导第 4 页；`SIMCTL_CHILD_ONBOARDING_DEBUG_DONE=1` 模拟引导已完成的老用户（验证冷启动订阅墙）。
+冷启动订阅墙：未订阅用户每次冷启动，开机图/视频播完、功能页面显示时自动拉起订阅页（解锁场景）；引导流程显示中不弹（引导末尾自带订阅页）；开机序列结束通知 `.splashSequenceDidFinish` 由 FactoryApp 发出、ShellRootView 监听（权益查询与开机序列双就绪门控）。
 
 ## 本地 StoreKit 商品配置（模拟器免沙盒账号）
 

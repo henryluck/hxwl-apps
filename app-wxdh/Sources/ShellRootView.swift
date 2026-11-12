@@ -19,6 +19,7 @@ struct ShellRootView: View {
     @State private var showRetention = false       // 挽留诱导页（订阅页关闭后弹）
     @State private var didTriggerPaywall = false   // 防重入：本次启动只触发一次订阅页
     @State private var entitlementReady = false    // isPro 查询完成（启动时等 StoreKit）
+    @State private var splashSequenceDone = false  // 开机图/视频播完、功能页面已显示
     /// 当前选中的 Tab（插件 id；nil 时自动选第一个插件）
     @State private var selectedTab: String?
     /// 法务正文（插件请求宿主用说明书正式协议渲染）
@@ -69,7 +70,6 @@ struct ShellRootView: View {
             // splash 期间等 isPro 查询就绪（StoreKit 几百 ms）
             await capabilities.pay.refreshEntitlement()
             entitlementReady = true
-            tryTriggerPaywall()
             #if DEBUG
             // 联调/截图：PAY_DEBUG_OPEN=1 直接拉起订阅页（绕过 isPro/引导态），仅 DEBUG 生效
             // PAY_DEBUG_VARIANT=startup 可切到启动场景（场景 01/03，默认解锁场景 02/04）
@@ -102,7 +102,6 @@ struct ShellRootView: View {
                 seenPaywall = false
                 didTriggerPaywall = false
             }
-            tryTriggerPaywall()
         }
         .onChange(of: finishedOnboarding) { done in
             // 引导页走完（含末尾订阅页被关闭）→ 检查 isPro + retention 决定是否弹挽留页（已购挽留不再弹）
@@ -129,6 +128,11 @@ struct ShellRootView: View {
                 paywallVariant = .unlock
                 DispatchQueue.main.async { showPaywall = true }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .splashSequenceDidFinish)) { _ in
+            // 开机图/视频播完、功能页面开始显示 → 此时才拉起启动订阅页（splash 期间不弹）
+            splashSequenceDone = true
+            tryTriggerPaywall()
         }
         .onReceive(NotificationCenter.default.publisher(for: .presentLegalDoc)) { note in
             if let doc = note.userInfo?["doc"] as? String {
@@ -166,8 +170,12 @@ struct ShellRootView: View {
     }
 
     /// 未完成引导且配置了引导页时，强制进入开机流程
+    /// DEBUG: ONBOARDING_DEBUG_DONE=1 模拟「引导已完成的老用户」（联调/截图冷启动订阅墙用）
     private var needsOnboarding: Bool {
-        !finishedOnboarding && !(spec.onboarding?.pages?.isEmpty ?? true)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["ONBOARDING_DEBUG_DONE"] == "1" { return false }
+        #endif
+        return !finishedOnboarding && !(spec.onboarding?.pages?.isEmpty ?? true)
     }
 
     /// 自管底部导航的插件（如四 Tab 业务 App）：整屏接管，不再套外层 TabView
@@ -248,17 +256,18 @@ struct ShellRootView: View {
         }
     }
 
-    /// 触发订阅页（isPro 短路 + 防重入）
+    /// 触发订阅页（isPro 短路 + 防重入 + 双就绪门控）
+    /// 需求：未订阅用户每次冷启动，功能页面显示时拉起订阅页（解锁场景）。
+    /// 门槛：① 权益查询完成（isPro 短路依赖它）② 开机序列结束（splash 期间不弹）。
+    /// 引导未走完时不触发——引导末尾自带订阅页，避免一次启动弹两次。
     private func tryTriggerPaywall() {
-        guard entitlementReady, !didTriggerPaywall else { return }
+        guard entitlementReady, splashSequenceDone, !didTriggerPaywall else { return }
         if capabilities.pay.isPro { return }   // 已订阅 → 什么都不弹
-        let hasOnboarding = !(spec.onboarding?.pages?.isEmpty ?? true)
-        // 到期未续（有订阅历史但当前非会员）：每次冷启动拉起订阅墙召回；
-        // 全新用户维持原逻辑（首次、无引导页时触发，引导页末尾自带订阅页）
-        if capabilities.pay.hasSubscriptionHistory || (!seenPaywall && !hasOnboarding) {
-            didTriggerPaywall = true
-            DispatchQueue.main.async { showPaywall = true }
-        }
+        // 引导流程显示中不弹（引导末尾自带订阅页）；needsOnboarding 含 DEBUG 老用户覆盖
+        guard !needsOnboarding else { return }
+        didTriggerPaywall = true
+        paywallVariant = .unlock
+        DispatchQueue.main.async { showPaywall = true }
     }
 
     /// 挽留页门控：配置开启 + 未购过挽留 + 无订阅历史。

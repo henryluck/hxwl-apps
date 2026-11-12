@@ -220,12 +220,24 @@ struct FactoryApp: App {
                         withAnimation(.easeOut(duration: 0.4)) {
                             showVideo = false
                         }
+                        // 开机序列结束、功能页面已显示 → 通知宿主可拉起启动订阅页
+                        NotificationCenter.default.post(name: .splashSequenceDidFinish, object: nil)
                     }
                     .transition(.opacity)
                 }
             }
             .task {
-                guard spec.onboarding?.splash != nil else { return }
+                // 开机序列：开机图 1.5s →（可选）视频 → 功能页面。
+                // 序列结束（功能页面开始显示）→ 通知宿主拉起启动订阅页。
+                func notifySequenceFinished() {
+                    NotificationCenter.default.post(name: .splashSequenceDidFinish, object: nil)
+                }
+                guard let splash = spec.onboarding?.splash else {
+                    // 无开机图：无视频即无序列，功能页面直接显示
+                    if spec.onboarding?.splash_video == nil { notifySequenceFinished() }
+                    return
+                }
+                _ = splash
                 try? await Task.sleep(for: .seconds(1.5))
                 // 有开机视频：图淡出 → 切视频阶段；无视频：图淡出直接进主界面
                 let hasVideo = spec.onboarding?.splash_video != nil
@@ -233,6 +245,8 @@ struct FactoryApp: App {
                     showSplash = false
                     if hasVideo { showVideo = true }
                 }
+                // 无视频时图片淡出即序列结束；有视频时由 SplashVideoView 完成回调发出
+                if !hasVideo { notifySequenceFinished() }
             }
         }
     }

@@ -275,20 +275,26 @@ public struct PaywallView: View {
 
     // MARK: - 背景（整屏主视觉 + 底部压成底色）
 
-    /// 主视觉高度占屏比：素材 780×1688 的图区在上方约一半，下方本身就是底色，
-    /// 故按场景裁切高度即可（裁掉的是纯底色区，不会切出硬边）。
-    /// 启动场景只有一行价格，主视觉铺满整屏，绿色由 greenWash 压到标题行附近；
-    /// 解锁场景内容多，仍按 46% 裁高给卖点/方案卡留完整底色。
+    /// 主视觉高度占屏比：unlock 场景裁到 46% 给卖点/方案卡留完整底色；
+    /// startup 场景铺满全屏，再由 backdropScale 放大（见下）。
     private var sceneHeightRatio: CGFloat {
         variant == .startup ? 1.0 : 0.46
     }
 
+    /// 主视觉放大倍数：startup 场景按原型把图片放大约 1.35 倍（以顶部为锚点）——
+    /// 素材实景区（约占图高 55%）随之延伸到屏幕约 74%，图片自带渐隐过渡落在 63–74%，
+    /// 实底绿只占屏幕底部约 1/4（与设计稿一致，箭头/公路清晰可见且更大）。
+    /// 放大后左右溢出被裁掉，主视觉主体仍居中完整。
+    private var backdropScale: CGFloat {
+        variant == .startup ? 1.35 : 1.0
+    }
+
     /// 绿幕：把「成片的绿色」压到内容区附近，并用渐变过渡避免裁切硬边。
-    /// 启动场景标题在约 77% 屏高处，绿色到 73% 才成形（只比标题行高一点）；
+    /// 启动场景：图片放大后自带过渡已落到 63–74%，绿幕从 70% 渐显、78% 成实底补足衔接；
     /// 解锁场景内容多、标题更高，起点相应上移。
     private var greenWash: LinearGradient {
-        let start: CGFloat = variant == .startup ? 0.60 : 0.34
-        let solid: CGFloat = variant == .startup ? 0.73 : 0.47
+        let start: CGFloat = variant == .startup ? 0.70 : 0.34
+        let solid: CGFloat = variant == .startup ? 0.78 : 0.47
         return LinearGradient(stops: [
             .init(color: Color(hex: "CDE8DC").opacity(0), location: 0),
             .init(color: Color(hex: "CDE8DC").opacity(0), location: start),
@@ -304,11 +310,13 @@ public struct PaywallView: View {
                 LinearGradient(colors: [Color(hex: "CDE8DC"), Color(hex: "B9DBCA")],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
                 if let bg = config.backgroundImage {
-                    // 顶部对齐、按场景裁高：只裁掉素材自带的底部底色，主视觉主体（卫星/山湖/路线）完整保留
+                    // 顶部对齐、按场景裁高；startup 再整体放大（顶部锚点，实景向下延伸，
+                    // 实底绿只留屏幕底部约 1/4），放大溢出部分被裁掉
                     AssetMedia(path: bg, contentMode: .fill)
                         .frame(width: geo.size.width,
                                height: geo.size.height * sceneHeightRatio,
                                alignment: .top)
+                        .scaleEffect(backdropScale, anchor: .top)
                         .clipped()
                         .frame(maxHeight: .infinity, alignment: .top)
                 }

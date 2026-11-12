@@ -15,6 +15,8 @@ public extension Notification.Name {
     static let paywallDidDismiss = Notification.Name("com.factory.core.paywallDidDismiss")
     /// 插件请求宿主展示法务正文（userInfo["doc"] = "privacy" | "terms"）
     static let presentLegalDoc = Notification.Name("com.factory.core.presentLegalDoc")
+    /// 开机序列（开机图/视频）播放完毕、功能页面已显示（宿主据此拉起启动订阅页）
+    static let splashSequenceDidFinish = Notification.Name("com.factory.core.splashSequenceDidFinish")
 }
 
 public enum PaywallPresenter {
