@@ -1,6 +1,7 @@
 import BaseComponents
 import Capabilities
 import CoreKit
+import Network
 import SwiftUI
 
 // 集成适配包：按选配条件导入。没被 project.yml 引用的包 canImport 返回 false，
@@ -44,7 +45,8 @@ struct FactoryApp: App {
     @StateObject private var pay: AnyPayService
     @StateObject private var strategyStore: PaywallStrategyStore
     private let planDisplays: [String: WeeklyPlanDisplay]
-    @State private var showSplash: Bool
+    /// 启动序列是否在进行中（图 + 视频共用一个不透明容器，见 body）
+    @State private var showSplashSequence: Bool
     @State private var showVideo: Bool
 
     init() {
@@ -114,7 +116,8 @@ struct FactoryApp: App {
             .sink { decision in
                 pay.setActiveWeeklyProduct(decision.productId)
             }
-        _showSplash = State(initialValue: spec.onboarding?.splash != nil)
+        _showSplashSequence = State(initialValue: spec.onboarding?.splash != nil
+                                    || spec.onboarding?.splash_video != nil)
         _showVideo = State(initialValue: false)
 
         // 集成装配：provider 路由 + #if canImport 选实现
@@ -183,17 +186,84 @@ struct FactoryApp: App {
             zhongtai: zhongtai
         )
 
-        // 中台：启动后台登录 → 归因 → 决策（时序红线：先归因后查设备信息）→ $AppStart 事件
+        // 中台启动链路（文档 361-617）：
+        // ① 登录（失败→网络恢复时重试）② 数盟 ID 上报（登录后）
+        // ③ 归因（activityChannel 写请求头）→ 订阅策略决策 → $AppStart（实时，必报）
+        // ④ 心跳埋点（首次 5 分钟后，之后每 25 分钟；后台暂停计时）
         if let z = zhongtaiClient {
-            Task {
-                do {
-                    try await z.login()
-                    try await z.reportAttribution()
-                    // 归因成功 → 拉订阅页策略决策（失败静默维持兜底）
-                    await store.refresh()
-                    try? await z.reportEvent(name: "$AppStart", params: ["$os": "iOS"])
-                } catch {
-                    Log.error("[Zhongtai] 启动流程失败: \(error.localizedDescription)")
+            bootstrapZhongtai(z, store: store)
+            startHeartbeat(z)
+        }
+    }
+
+    /// 启动链路：login → 数盟 → 归因 → 策略决策 → $AppStart。login 失败挂网络恢复重试。
+    private func bootstrapZhongtai(_ z: ZhongtaiClient, store: PaywallStrategyStore) {
+        Task {
+            do {
+                try await z.login()
+            } catch {
+                Log.error("[Zhongtai] 启动登录失败（待网络恢复重试）: \(error.localizedDescription)")
+                await Self.retryLoginWhenReachable(z, store: store)
+                return
+            }
+            await Self.postLoginFlow(z, store: store)
+        }
+    }
+
+    /// 登录成功后的固定序列（可重入；网络恢复重试也走这里）。
+    /// 时序红线：先归因后查策略决策（决策可能依赖归因渠道）。
+    private static func postLoginFlow(_ z: ZhongtaiClient, store: PaywallStrategyStore) async {
+        try? await z.reportDigitalUnion()
+        try? await z.reportAttribution()
+        await store.refresh()
+        try? await z.reportEvent(name: "$AppStart",
+                                 params: ["$resume_from_background": false])
+    }
+
+    /// 文档 8.2：登录失败，网络变为可用时重新调用（NWPathMonitor 监听，一次性）。
+    private static func retryLoginWhenReachable(_ z: ZhongtaiClient, store: PaywallStrategyStore) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            final class OnceBox: @unchecked Sendable {
+                var done = false
+                let lock = NSLock()
+                func claim() -> Bool { lock.lock(); defer { lock.unlock() }
+                    if done { return false }; done = true; return true }
+            }
+            let once = OnceBox()
+            let monitor = NWPathMonitor()
+            monitor.pathUpdateHandler = { path in
+                guard path.status == .satisfied, once.claim() else { return }
+                monitor.cancel()
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)   // 网络刚恢复缓 1.5s
+                    if (try? await z.healthCheck()) == true {
+                        await postLoginFlow(z, store: store)
+                    }
+                    cont.resume()
+                }
+            }
+            monitor.start(queue: DispatchQueue(label: "zhongtai.netwatch"))
+        }
+    }
+
+    /// 文档 8.6.2：sdk_heartbeat —— 启动 5 分钟后第一次，之后每 25 分钟一次；
+    /// 进后台暂停计时，回前台继续。
+    private func startHeartbeat(_ z: ZhongtaiClient) {
+        Task {
+            var elapsed: TimeInterval = 0
+            let tick: TimeInterval = 30          // 粒度 30s，后台不累计
+            let first: TimeInterval = 5 * 60
+            let interval: TimeInterval = 25 * 60
+            var firedOnce = false
+            while true {
+                try? await Task.sleep(nanoseconds: UInt64(tick * 1_000_000_000))
+                guard await UIApplication.shared.applicationState != .background else { continue }
+                elapsed += tick
+                let target = firedOnce ? interval : first
+                if elapsed >= target {
+                    elapsed = 0
+                    firedOnce = true
+                    try? await z.reportEvent(name: "sdk_heartbeat", params: [:])
                 }
             }
         }
@@ -208,20 +278,29 @@ struct FactoryApp: App {
                     .environment(\.weeklyPlanDisplays, planDisplays)
                     .environment(\.strategySplitEnabled, spec.monetization.strategySplitEnabled)
 
-                // 启动序列：开机图 →（可选）开机视频 → 主界面
-                // 苹果启动页只能静态图，视频在 App 内用 AVPlayer 播，与图无缝拼接。
-                if let splash = spec.onboarding?.splash, showSplash {
-                    SplashView(image: splash, theme: capabilities.theme)
-                        .transition(.opacity)
-                }
-                if let video = spec.onboarding?.splash_video, showVideo {
-                    SplashVideoView(path: video, theme: capabilities.theme) {
-                        // 视频播完：淡出进主界面
-                        withAnimation(.easeOut(duration: 0.4)) {
-                            showVideo = false
+                // 启动序列：整段是**一个不透明层**，内部「开机图 → 开机视频」直接叠放。
+                // 闪白修复要点：
+                //   ① 图与视频不再各自做 0.4s 交叉 opacity 过渡 —— 两个半透明层叠在
+                //      白色主界面上，中间时刻合成不透明度 < 1，会透出白底；
+                //   ② 容器底部常驻开机图，视频首帧未就绪时整层透明，露出的仍是开机图；
+                //   ③ 只有整个序列结束时容器才统一淡出到主界面。
+                // 【Bug 行5】"感觉有 2 个启动页"：系统 LaunchScreen（launchBackground 深青
+                // 纯色）先消失，splash.png 尚在解码 → 间隙露出主界面再跳成开机图，观感即
+                // 启动页闪两下。兜底：splash 层最底部垫一块与 LaunchScreen 同色的实底，
+                // 图解码期间露出的也是同一深青色，两段视觉无缝衔接（不再有中间跳变帧）。
+                if showSplashSequence {
+                    ZStack {
+                        Color(hex: "184853").ignoresSafeArea()
+                        if let splash = spec.onboarding?.splash {
+                            SplashView(image: splash, theme: capabilities.theme)
+                        } else {
+                            capabilities.theme.colors.bgPage.ignoresSafeArea()
                         }
-                        // 开机序列结束、功能页面已显示 → 通知宿主可拉起启动订阅页
-                        NotificationCenter.default.post(name: .splashSequenceDidFinish, object: nil)
+                        if let video = spec.onboarding?.splash_video, showVideo {
+                            SplashVideoView(path: video, theme: capabilities.theme) {
+                                finishSplashSequence()
+                            }
+                        }
                     }
                     .transition(.opacity)
                 }
@@ -229,25 +308,31 @@ struct FactoryApp: App {
             .task {
                 // 开机序列：开机图 1.5s →（可选）视频 → 功能页面。
                 // 序列结束（功能页面开始显示）→ 通知宿主拉起启动订阅页。
-                func notifySequenceFinished() {
+                guard showSplashSequence else {
                     NotificationCenter.default.post(name: .splashSequenceDidFinish, object: nil)
-                }
-                guard let splash = spec.onboarding?.splash else {
-                    // 无开机图：无视频即无序列，功能页面直接显示
-                    if spec.onboarding?.splash_video == nil { notifySequenceFinished() }
                     return
                 }
-                _ = splash
-                try? await Task.sleep(for: .seconds(1.5))
-                // 有开机视频：图淡出 → 切视频阶段；无视频：图淡出直接进主界面
-                let hasVideo = spec.onboarding?.splash_video != nil
-                withAnimation(.easeOut(duration: 0.4)) {
-                    showSplash = false
-                    if hasVideo { showVideo = true }
+                // 无开机图但有视频：跳过静态图阶段，直接播视频
+                guard spec.onboarding?.splash != nil else {
+                    showVideo = true
+                    return
                 }
-                // 无视频时图片淡出即序列结束；有视频时由 SplashVideoView 完成回调发出
-                if !hasVideo { notifySequenceFinished() }
+                try? await Task.sleep(for: .seconds(1.5))
+                if spec.onboarding?.splash_video != nil {
+                    showVideo = true            // 无动画：直接叠到常驻开机图之上
+                } else {
+                    finishSplashSequence()
+                }
             }
         }
+    }
+
+    /// 序列结束：整层（开机图 + 视频）一起淡出，避免视频层先消失又闪回静态图。
+    /// 同时通知宿主「开机序列已完成」，用于拉起启动订阅页（NAV 侧 splashSequenceDone）。
+    private func finishSplashSequence() {
+        withAnimation(.easeOut(duration: 0.4)) {
+            showSplashSequence = false
+        }
+        NotificationCenter.default.post(name: .splashSequenceDidFinish, object: nil)
     }
 }

@@ -340,18 +340,19 @@ public final class SearchService: NSObject, ObservableObject {
         for part in [city, district] where !part.isEmpty {
             if text.hasPrefix(part) { text.removeFirst(part.count) }
         }
-        // 处理「广东省广州市越秀区」这类未按字段返回的整串前缀
-        if let range = text.range(of: "省") {
-            let head = String(text[text.startIndex...range.upperBound])
-            if head.count <= 8 { text.removeFirst(head.count) }
-        }
-        if let range = text.range(of: "市") {
-            let head = String(text[text.startIndex...range.upperBound])
-            if head.count <= 8 { text.removeFirst(head.count) }
-        }
-        if let range = text.range(of: "区") {
-            let head = String(text[text.startIndex...range.upperBound])
-            if head.count <= 8 { text.removeFirst(head.count) }
+        // 处理「广东省广州市越秀区」这类未按字段返回的整串前缀。
+        // 【崩溃修复】必须用半开区间 ..<，不能用闭区间 ...：
+        //   range(of: "省").upperBound 是「省」之后的位置；当命中字符正好在串尾时
+        //   upperBound == text.endIndex，闭区间会触发 ClosedRange.relative(to:)
+        //   对 endIndex 调 index(after:) → _StringGuts.validateCharacterIndex 越界崩溃
+        //   （线上崩溃：点「充电桩」→ searchNearby → place → cleanAddress）。
+        // 顺带修掉闭区间多吞一个字符的 off-by-one：head 应止于 upperBound 之前，
+        // 否则「广东省广州市」会被截成「州市…」。
+        for delimiter in ["省", "市", "区"] {
+            guard let range = text.range(of: delimiter) else { continue }
+            let headRange = text.startIndex..<range.upperBound   // 含 delimiter 本身
+            guard String(text[headRange]).count <= 8 else { continue }
+            text.removeSubrange(headRange)
         }
         return text.isEmpty ? raw : text
     }

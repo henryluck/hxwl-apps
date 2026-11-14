@@ -303,11 +303,30 @@ public final class NavAppModel: ObservableObject {
         guard let destination else { return }
         // 起点优先用户手选；否则用当前有效位置（无缓存时取一次真实定位，不拿 0,0 算路）
         var originPlace = originDisplay
+        // 【Bug 行15】规划时若定位权限仍未决定，先触发系统授权弹窗——
+        // 未授权时 requestSingleFix 恒 nil → engine.fail(locationUnavailable)，
+        // 用户看到「无法获取位置」且无法拉起导航。权限修复链路（宿主 ATT→通知→定位）
+        // 已覆盖大多数场景，这里是功能兜底：任何入口进规划都保证权限被请求过。
+        if location.authState == .notDetermined {
+            location.requestAuthorization()
+            // 授权弹窗出现后稍等授权回调刷新状态，再尝试定位
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            location.refreshAuthState()
+        }
         if originPlace == nil, let fix = await location.requestSingleFix() {
             originPlace = fix.place
         }
         guard let originPlace, originPlace.hasValidCoordinate else {
             engine.fail(location.authState.isUsable ? .locationUnavailable : .locationDenied)
+            return
+        }
+        // 【Bug 行16】起终点一致（名称相同且坐标几乎重合）不发起算路，直接给失败态提示。
+        // MKDirections 对重合起终点会返回 directionsNotFound（笼统"无路线"），这里提前拦截
+        // 并给出可理解的提示文案。
+        if originPlace.hasValidCoordinate, destination.hasValidCoordinate,
+           originPlace.name == destination.name,
+           Geo.distance(originPlace.gcj02Coordinate, destination.gcj02Coordinate) < 5 {
+            engine.fail(.sameOriginDestination)
             return
         }
         await engine.plan(origin: originPlace, destination: destination, mode: mode)

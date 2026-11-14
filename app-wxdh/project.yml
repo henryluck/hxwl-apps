@@ -37,12 +37,16 @@ targets:
         CFBundleDisplayName: "智能卫星定位"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        UILaunchScreen: {}
+        # 启动屏底色取开机图 splash.png 顶部主色（深青 #184853）：
+        # 空 {} 时系统启动屏是纯白，会在开机图出现前闪一下白。
+        UILaunchScreen:
+            UIColorName: launchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSPhotoLibraryAddUsageDescription: 保存素材到你的相册
         NSPhotoLibraryUsageDescription: 选择停车照片，仅保存在本机
         NSLocationWhenInUseUsageDescription: 用于展示当前位置、搜索附近地点、规划路线与实时导航
+        NSUserTrackingUsageDescription: 你的数据将用于提升广告相关性与个性化体验，是否允许跨 App 追踪
         UIBackgroundModes:
           - location
           - audio
@@ -58,3 +62,10 @@ targets:
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          # #if DEBUG 调试入口（PAY_DEBUG_* / NAV_DEBUG_* / ONBOARDING_DEBUG_*）依赖此条件；
+          # 缺失时所有 #if DEBUG 代码被裁掉，SIMCTL_CHILD 环境变量入口静默失效（README 有教训记录）
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+          ONLY_ACTIVE_ARCH: 'YES'
+          ENABLE_TESTABILITY: 'YES'

@@ -1,5 +1,6 @@
 import BaseComponents
 import Capabilities
+import CoreKit
 import SwiftUI
 
 /// 壳根视图：按说明书装配 Tab（M1：占位首页 + 我的；M2 起插件页面挂载进来）
@@ -133,6 +134,7 @@ struct ShellRootView: View {
             // 开机图/视频播完、功能页面开始显示 → 此时才拉起启动订阅页（splash 期间不弹）
             splashSequenceDone = true
             tryTriggerPaywall()
+            tryTriggerPermissionFlow()
         }
         .onReceive(NotificationCenter.default.publisher(for: .presentLegalDoc)) { note in
             if let doc = note.userInfo?["doc"] as? String {
@@ -157,15 +159,26 @@ struct ShellRootView: View {
                 NotificationCenter.default.post(name: .paywallDidDismiss, object: nil)
                 if capabilities.pay.isPro {
                     seenPaywall = true
+                    tryTriggerPermissionFlow()   // 订阅页消失 → 走 ATT/通知/定位权限流程
                 } else if shouldOfferRetention {
                     DispatchQueue.main.async { showRetention = true }
                 } else {
                     seenPaywall = true
+                    tryTriggerPermissionFlow()   // 订阅页消失 → 走 ATT/通知/定位权限流程
                 }
             }
         }
         .onChange(of: showRetention) { shown in
-            if !shown { seenPaywall = true }
+            if !shown {
+                seenPaywall = true
+                // 挽留页也消失了（订阅链路彻底结束）→ 此时才弹 ATT/通知，NavKit 请求定位
+                tryTriggerPermissionFlow()
+            }
+        }
+        .onChange(of: finishedOnboarding) { done in
+            // 引导末页订阅页关闭时 OnboardingFlow 才回调 onFinish（finishedOnboarding=true），
+            // 与下方「引导页走完」分支同一时机：订阅链路结束 → 权限流程
+            if done { tryTriggerPermissionFlow() }
         }
     }
 
@@ -262,12 +275,36 @@ struct ShellRootView: View {
     /// 引导未走完时不触发——引导末尾自带订阅页，避免一次启动弹两次。
     private func tryTriggerPaywall() {
         guard entitlementReady, splashSequenceDone, !didTriggerPaywall else { return }
+        #if DEBUG
+        // 联调/截图：PAY_DEBUG_NO_WALL=1 抑制冷启动订阅墙（功能页截图用，仅 DEBUG）
+        if ProcessInfo.processInfo.environment["PAY_DEBUG_NO_WALL"] == "1" { return }
+        #endif
         if capabilities.pay.isPro { return }   // 已订阅 → 什么都不弹
         // 引导流程显示中不弹（引导末尾自带订阅页）；needsOnboarding 含 DEBUG 老用户覆盖
         guard !needsOnboarding else { return }
         didTriggerPaywall = true
         paywallVariant = .unlock
         DispatchQueue.main.async { showPaywall = true }
+    }
+
+    /// 触发权限流程（ATT → 通知 → 定位）：订阅链路（订阅页/挽留页/引导）彻底结束后才跑。
+    /// 系统权限弹窗一次只显示一个，PermissionFlowController 内部 await 串行；
+    /// 定位由 NavKit 监听 `.permissionFlowDidFinish` 后调 LocationService 请求。
+    /// 首次之后不重复弹（UserDefaults 标记）。
+    ///
+    /// 【Bug 修复·行6/7】此前门控读 `showPaywall || showRetention` 的瞬时 UI 状态：
+    /// `tryTriggerPaywall` 用 `DispatchQueue.main.async` 延迟一帧才置 `showPaywall = true`，
+    /// 同帧触发的权限流程读到 false 就直接开跑 → ATT 弹窗被订阅页盖住（用户永远看不到）
+    /// 或时序上抢在订阅页前弹（观感即"没拉起"）。改用链路状态判断：
+    /// didTriggerPaywall=true 表示订阅墙已在本轮启动弹出，必须等订阅链路走完（seenPaywall）。
+    private func tryTriggerPermissionFlow() {
+        // 本轮启动已拉起订阅墙但链路未走完（订阅页/挽留页还在）→ 等后续关闭回调再触发
+        if didTriggerPaywall && !seenPaywall { return }
+        // 挽留页正在展示 → 等
+        if showRetention { return }
+        Task { @MainActor in
+            await PermissionFlowController.runIfNeeded()
+        }
     }
 
     /// 挽留页门控：配置开启 + 未购过挽留 + 无订阅历史。

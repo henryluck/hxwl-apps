@@ -238,6 +238,7 @@ public enum NavFailure: Equatable, Sendable {
     case authRequired
     case draftUnconfirmed
     case engineStartFailed
+    case sameOriginDestination   // 【Bug 行16】起终点一致，提前拦截给可理解提示
     case unknown
 
     public var title: String {
@@ -254,6 +255,7 @@ public enum NavFailure: Equatable, Sendable {
         case .authRequired: return "需要会员权益才能使用"
         case .draftUnconfirmed: return "请先选择新的目的地"
         case .engineStartFailed: return "导航启动失败，请重试"
+        case .sameOriginDestination: return "起点和终点不能相同，请更换目的地"
         case .unknown: return "操作未完成，请重试"
         }
     }
@@ -265,7 +267,7 @@ public enum NavFailure: Equatable, Sendable {
         case .locationDenied, .locationServicesOff: return [.openSettings]
         case .offline, .serviceError, .noRoute, .outOfServiceArea, .engineStartFailed, .unknown:
             return [.retry]
-        case .invalidPlace, .draftUnconfirmed: return [.pickPlace]
+        case .invalidPlace, .draftUnconfirmed, .sameOriginDestination: return [.pickPlace]
         case .authRequired: return [.unlock]
         }
     }

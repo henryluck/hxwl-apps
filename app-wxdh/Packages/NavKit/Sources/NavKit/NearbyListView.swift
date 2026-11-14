@@ -72,31 +72,52 @@ struct NearbyListView: View {
     }
 
     private var categoryBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(NearbyCategory.allCases) { category in
-                    Button {
-                        guard model.requireMembership() else { return }
-                        model.openNearby(category)
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: category.icon)
-                                .font(.system(size: 12, weight: .semibold))
-                            Text(category.title)
-                                .font(.system(size: 13, weight: .medium))
+        // 【Bug 行14】从首页快捷服务跳进来时，选中分类可能超出屏幕右缘。
+        // ScrollViewReader + onChange：选中项变化即自动滚动，让选中 chip 完整可见。
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(NearbyCategory.allCases) { category in
+                        Button {
+                            guard model.requireMembership() else { return }
+                            model.openNearby(category)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: category.icon)
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text(category.title)
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .foregroundStyle(model.nearbyCategory == category ? .white : NavTheme.inkSoft)
+                            .padding(.horizontal, 12)
+                            .frame(height: 34)
+                            .background(model.nearbyCategory == category ? NavTheme.accent : NavTheme.bg,
+                                        in: Capsule())
                         }
-                        .foregroundStyle(model.nearbyCategory == category ? .white : NavTheme.inkSoft)
-                        .padding(.horizontal, 12)
-                        .frame(height: 34)
-                        .background(model.nearbyCategory == category ? NavTheme.accent : NavTheme.bg,
-                                    in: Capsule())
+                        .buttonStyle(.plain)
+                        .id(category.rawValue)
+                        .accessibilityAddTraits(model.nearbyCategory == category ? [.isSelected] : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(model.nearbyCategory == category ? [.isSelected] : [])
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .onChange(of: model.nearbyCategory) { category in
+                guard let category else { return }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(category.rawValue, anchor: .center)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .onAppear {
+                // 进入页面（快捷服务跳转）时同样滚到选中项
+                if let category = model.nearbyCategory {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            proxy.scrollTo(category.rawValue, anchor: .center)
+                        }
+                    }
+                }
+            }
         }
         .background(NavTheme.panel)
     }

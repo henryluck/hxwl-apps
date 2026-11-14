@@ -380,7 +380,8 @@ public struct PaywallView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity)
-                .padding(.bottom, 18)
+                // 【Bug 行2】启动场景标题与价格行之间空白收紧：18→10（解锁场景保持 18）
+                .padding(.bottom, variant == .startup ? 10 : 18)
 
             switch phase {
             case .active:
@@ -390,7 +391,7 @@ public struct PaywallView: View {
             case .offer:
                 if variant == .startup {
                     startupPriceLine
-                        .padding(.top, 6)
+                        .padding(.top, 2)
                 } else {
                     benefitsList
                     plansBlock
@@ -495,29 +496,31 @@ public struct PaywallView: View {
         }
     }
 
-    /// 启动场景的价格行（场景 01/03）：「首周 5.8，之后 ¥58/周」/「¥58/周」。
-    /// 分流模式走 weeklyCopy 三级兜底；未分流传 maintB 现状口径。
+    /// 启动场景的价格行（场景 01/03）。
+    /// 【Bug 行2】文案口径调整：常规「新用户特惠首周￥5.8，之后￥58/周」、
+    /// 免费试用「新用户特惠免费试用3天，之后￥58/周」；整行不加粗、16pt（较原 18pt 小 2 号）；
+    /// 上方标题间距收紧（panel 顶部 18pt→10pt、价格行 top 6→2），缩小空白。
     private var startupPriceLine: Text {
         if envSplitEnabled {
             let copy = weeklyCopy
-            return Text(copy.price).font(.system(size: 18, weight: .semibold))
-                + Text("，").font(.system(size: 18))
-                + Text(copy.subtitle).font(.system(size: 18))
+            return Text(copy.price).font(.system(size: 16))
+                + Text("，").font(.system(size: 16))
+                + Text(copy.subtitle).font(.system(size: 16))
         }
         if config.strategy == "free_trial" {
-            return Text("免费试用 ").font(.system(size: 18))
-                + Text("\(config.trialDays)").font(.system(size: 18, weight: .semibold))
-                + Text(" 天，之后 \(renewPrice)/周").font(.system(size: 18))
+            return Text("新用户特惠免费试用").font(.system(size: 16))
+                + Text("\(config.trialDays)").font(.system(size: 16))
+                + Text("天，之后 \(renewPrice)/周").font(.system(size: 16))
         }
         if introAvailable {
-            return Text("首周 ").font(.system(size: 18))
-                + Text(introDigits).font(.system(size: 18, weight: .semibold))
-                + Text("，之后 \(renewPrice)/周").font(.system(size: 18))
+            return Text("新用户特惠首周￥").font(.system(size: 16))
+                + Text(introDigits).font(.system(size: 16))
+                + Text("，之后 \(renewPrice)/周").font(.system(size: 16))
         }
         // 场景 03：无首期资格，不出现任何首周暗示
-        return Text("¥").font(.system(size: 18))
-            + Text(Self.amountDigits(renewPrice)).font(.system(size: 18, weight: .semibold))
-            + Text("/周").font(.system(size: 18))
+        return Text("￥").font(.system(size: 16))
+            + Text(Self.amountDigits(renewPrice)).font(.system(size: 16))
+            + Text("/周").font(.system(size: 16))
     }
 
     /// 方案行：单选圆点 + 名称/说明 + 价格（选中加粗描边）
@@ -800,13 +803,15 @@ public struct PaywallView: View {
     private func planPrice(_ target: PaywallPlan) -> String {
         guard target == .weekly else { return lifetimePriceText }
         if envSplitEnabled { return weeklyCopy.price }
-        if introAvailable { return "首周 \(introDigits)" }
+        // 【Bug 行3】套餐名已含「首周优惠」语义，价格大字只留金额：加 ￥ 前缀、不带「首周」
+        if introAvailable { return "￥\(introDigits)" }
         return renewPrice
     }
 
     private func planPriceUnit(_ target: PaywallPlan) -> String? {
         guard target == .weekly else { return nil }
-        if introAvailable || config.strategy == "free_trial" { return nil }
+        // 【Bug 行3】有首期价时加 "/周" 单位（此前 nil 导致单位缺失）
+        if config.strategy == "free_trial" { return nil }
         return "/周"
     }
 

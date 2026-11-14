@@ -23,6 +23,8 @@ struct WeatherScreen: View {
 
             ScrollView {
                 VStack(spacing: 14) {
+                    // 【Bug 行10】补顶部标题栏（与罗盘/海拔页同构：「天气」标题 + 我的/会员入口）
+                    pageTitleBar
                     header
                     if let failure = service.failure, service.snapshot == nil {
                         NavFailureView(failure: failure) { action in
@@ -59,6 +61,43 @@ struct WeatherScreen: View {
             if region == nil { await useDeviceRegionIfPossible() }
             if service.snapshot == nil { await reload() }
         }
+    }
+
+    /// 【Bug 行10】顶部标题栏：与罗盘/海拔页同构（页标题 + 我的 + 会员金色 chip）
+    private var pageTitleBar: some View {
+        HStack {
+            Text("天气")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
+            Spacer()
+            Button {
+                model.showProfile = true
+            } label: {
+                Label("我的", systemImage: "person")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 38)
+                    .background(.white.opacity(0.16), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+
+            Button {
+                _ = model.requireMembership()
+            } label: {
+                Label("会员", systemImage: "crown.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Color(hex: "533600"))
+                    .padding(.horizontal, 12)
+                    .frame(height: 38)
+                    .background(Color(hex: "FFCB4D"), in: Capsule())
+                    .shadow(color: Color(hex: "D8A20C").opacity(0.12), radius: 3, y: 2)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("会员中心")
+        }
+        .padding(.top, 4)
     }
 
     private var header: some View {
@@ -316,6 +355,8 @@ struct WeatherRegionPicker: View {
     @State private var query = ""
     @State private var results: [Place] = []
     @State private var searching = false
+    @State private var searchTask: Task<Void, Never>?   // 【Bug 行10】可取消的搜索任务
+    @State private var debounceWorkItem: DispatchWorkItem?
 
     var body: some View {
         NavigationStack {
@@ -402,18 +443,35 @@ struct WeatherRegionPicker: View {
 
     private func search(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { results = []; return }
-        searching = true
-        Task {
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            let outcome = await model.search.search(query: trimmed, scope: .manual, center: nil)
-            results = outcome.results
+        // 【Bug 行10】修复闪退：原实现每敲一个字立即发起一次 MKLocalSearch，
+        // 连续输入会瞬间并发多个检索；MapKit 并发检索超过约 5 个会直接 crash
+        //（MKLocalSearch is not finished / too many concurrent）。
+        // 修复：500ms 防抖 + 取消上一个在途搜索任务，同一时刻最多一个 MKLocalSearch。
+        debounceWorkItem?.cancel()
+        searchTask?.cancel()
+        guard !trimmed.isEmpty else {
+            results = []
             searching = false
+            return
         }
+        searching = true
+        let work = DispatchWorkItem { [weak model] in
+            guard let model else { return }
+            searchTask = Task {
+                let outcome = await model.search.search(query: trimmed, scope: .manual, center: nil)
+                guard !Task.isCancelled else { return }
+                results = outcome.results
+                searching = false
+            }
+        }
+        debounceWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     private func useDevice() async {
         guard let fix = await model.location.requestSingleFix() else { return }
+        // 【Bug 行10】CLGeocoder 并发实例过多同样会 crash（与 MKLocalSearch 同类限制），
+        // 单次调用即可；反编码失败静默退出，不给崩溃机会
         let geocoder = CLGeocoder()
         let location = CLLocation(latitude: fix.latitude, longitude: fix.longitude)
         guard let mark = try? await geocoder.reverseGeocodeLocation(location).first else { return }

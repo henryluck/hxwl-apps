@@ -13,6 +13,10 @@ struct SearchView: View {
             content
         }
         .background(NavTheme.bg)
+        // 【Bug 行13】键盘弹出时系统会把整个布局顶起（页面"顶上去"导致输入框被键盘/导航栏
+        // 挤出可视区）。ignoresSafeArea(.keyboard) 让键盘悬浮在列表之上：header 固定不动，
+        // 结果列表自行滚动，输入框始终可见。
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .onAppear {
             focused = true
             model.updateSuggestions(model.searchText)
