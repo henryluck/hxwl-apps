@@ -67,14 +67,14 @@ public struct ToolboxView: View {
                         onOpenTool(.liveToStill)
                     } label: {
                         CleanCard {
-                            HStack(spacing: 12) {
-                                ToolboxIcon("tool_live.png", size: 26)
-                                VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 14) {
+                                ToolboxIcon("tool_live.png", size: 32)
+                                VStack(alignment: .leading, spacing: 4) {
                                     Text("Live Photo转静态")
-                                        .font(.system(size: 16, weight: .semibold))
+                                        .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(Color(hex: "1A1A1A"))
                                     Text("保留精彩瞬间，导出为普通照片")
-                                        .font(.system(size: 12))
+                                        .font(.system(size: 13))
                                         .foregroundStyle(Color(hex: "9AA09C"))
                                 }
                                 Spacer()
@@ -82,7 +82,7 @@ public struct ToolboxView: View {
                                     .font(.system(size: 13))
                                     .foregroundStyle(Color(hex: "C9CDD4"))
                             }
-                            .padding(16)
+                            .padding(18)
                         }
                     }
                     .accessibilityIdentifier("tool.Live Photo转静态")
@@ -129,20 +129,20 @@ public struct ToolboxView: View {
             onOpenTool(kind)
         } label: {
             CleanCard {
-                VStack(alignment: .leading, spacing: 8) {
-                    ToolboxIcon(icon, size: 36)
+                VStack(alignment: .leading, spacing: 10) {
+                    ToolboxIcon(icon, size: 44)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.leading, 2)
                     Text(kind.rawValue)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(Color(hex: "1A1A1A"))
                     Text(desc)
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .foregroundStyle(Color(hex: "9AA09C"))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(14)
-                .frame(height: 110, alignment: .topLeading)
+                .padding(16)
+                .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
             }
         }
         .accessibilityIdentifier("tool.\(kind.rawValue)")

@@ -49,6 +49,7 @@ public struct SettingsView: View {
 
     @Environment(\.openURL) private var openURL
     @State private var showPaywall = false
+    @State private var showSubscribed = false
     @State private var link: SupportLink?
     @State private var legalDoc: LegalDoc?
 
@@ -169,6 +170,15 @@ public struct SettingsView: View {
                 }
             }
         }
+        // 挂在 NavigationStack 外层，与内层订阅墙的 fullScreenCover 互不冲突
+        .fullScreenCover(isPresented: $showSubscribed) {
+            ProtoSubscribedView(
+                onClose: { showSubscribed = false },
+                onContinue: {
+                    showSubscribed = false
+                    TabSwitcher.switchTo("clean_kit")
+                })
+        }
     }
 
     /// 评价：配了 App Store 链接跳走写评价；否则应用内评分弹窗兜底。
@@ -239,9 +249,7 @@ public struct SettingsView: View {
             }
             Spacer()
             Button("管理订阅") {
-                if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
-                    openURL(url)
-                }
+                showSubscribed = true
             }
             .font(.caption)
         }

@@ -131,7 +131,11 @@ public final class ThumbCache {
             }
             let opts = PHImageRequestOptions()
             opts.isNetworkAccessAllowed = false
-            opts.deliveryMode = .opportunistic
+            // .opportunistic 在真机上会回调两次（先降质小图再高清图），
+            // continuation 只能 resume 一次，第二次直接触发
+            // "CheckedContinuation resumed more than once" 崩溃（模拟器相册空不复现）。
+            // 改 .highQualityFormat：只回调一次，语义即"要最终高清图"。
+            opts.deliveryMode = .highQualityFormat
             opts.resizeMode = .fast
             PHImageManager.default().requestImage(for: asset, targetSize: size,
                                                   contentMode: .aspectFill, options: opts) { img, info in
@@ -139,7 +143,10 @@ public final class ThumbCache {
                 if let img, !degraded {
                     self.cache.setObject(img, forKey: assetID as NSString, cost: Int(img.size.width * img.size.height * 4))
                 }
-                cont.resume(returning: degraded ? nil : img)
+                // 防御：理论上 highQualityFormat 只回调一次，但 iCloud/异常路径若再回调
+                // 绝不能二次 resume（会崩）。重复回调仅更新缓存后忽略。
+                if degraded { return }
+                cont.resume(returning: img)
             }
         }
     }

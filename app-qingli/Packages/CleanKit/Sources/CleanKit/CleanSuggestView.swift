@@ -1,3 +1,4 @@
+import Capabilities
 import CoreKit
 import SwiftUI
 
@@ -6,15 +7,19 @@ public struct CleanSuggestView: View {
     let summary: ScanSummary
     let onOneTapClean: () -> Void
     let onOpenCategory: (CleanKind) -> Void
+    /// 订阅门：未订阅点一键清理 → 弹订阅页（需求：核心功能拉订阅）
+    var pay: (any PayService)? = nil
 
     @State private var recheck = false
 
     public init(summary: ScanSummary,
                 onOneTapClean: @escaping () -> Void,
-                onOpenCategory: @escaping (CleanKind) -> Void) {
+                onOpenCategory: @escaping (CleanKind) -> Void,
+                pay: (any PayService)? = nil) {
         self.summary = summary
         self.onOneTapClean = onOneTapClean
         self.onOpenCategory = onOpenCategory
+        self.pay = pay
     }
 
     private var order: [CleanKind] {
@@ -45,6 +50,8 @@ public struct CleanSuggestView: View {
             VStack(spacing: 0) {
                 if summary.totalCleanableCount > 0 {
                     CleanPrimaryButton("一键清理\(summary.totalCleanableCount)项（\(ByteFormatter.short(summary.totalCleanableBytes))）") {
+                        // 订阅门：未订阅拉起订阅页，不放行清理
+                        guard !CoreFeatureGate.gate(pay) else { return }
                         onOneTapClean()
                     }
                 }

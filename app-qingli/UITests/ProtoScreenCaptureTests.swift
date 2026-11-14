@@ -93,6 +93,43 @@ final class ProtoScreenCaptureTests: XCTestCase {
         }
     }
 
+    /// 完成订阅页（素材《订阅成功.png》对照）：购买成功后整屏展示，替代原「订阅成功」弹窗。
+    /// 真机购买走 StoreKit 无法在 UI 测试里触发，用启动参数直接呈现该页截屏。
+    @MainActor
+    func testCaptureSubscriptionSuccess() throws {
+        let app = launchApp(extraArgs: ["-uitest-subscription-success"])
+        XCTAssertTrue(app.buttons["subscribeSuccess.start"].waitForExistence(timeout: 6))
+        sleep(1)
+        snap("proto_subscription_success")
+    }
+
+    /// 已订阅页 + 续订弹窗（素材《已订阅.png》《续订.png》对照）：
+    /// 个人中心「管理订阅」→ 应用内已订阅页 → 点「取消续费」→ 续订弹窗 → ✕ 关闭。
+    @MainActor
+    func testCaptureSubscribedAndRenewGuide() throws {
+        let app = launchApp(extraArgs: ["-uitest-proto-subscribed"])
+        openProfileTab(app)
+        let manage = app.buttons["管理订阅"]
+        XCTAssertTrue(manage.waitForExistence(timeout: 5))
+        manage.tap()
+
+        let cancel = app.buttons["subscribed.cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        sleep(1)
+        snap("proto_subscribed_page")
+
+        cancel.tap()
+        let guideClose = app.buttons["renewGuide.close"]
+        XCTAssertTrue(guideClose.waitForExistence(timeout: 5))
+        sleep(1)
+        snap("proto_renew_guide")
+
+        guideClose.tap()
+        sleep(1)
+        XCTAssertFalse(guideClose.exists)
+        XCTAssertTrue(app.buttons["subscribed.continue"].exists)
+    }
+
     /// 复购订阅页（原型《复购订阅页面》对照）：钩子强制无首期资格 → 显示 ¥48/周，无新人特惠角标
     @MainActor
     func testCapturePaywallRenewal() throws {
@@ -105,6 +142,42 @@ final class ProtoScreenCaptureTests: XCTestCase {
             snap("proto_paywall_renewal")
         } else {
             snap("proto_paywall_renewal_button_missing")
+        }
+    }
+
+    /// 四个清理详情页布局回归：相似照片 / 截图清理 / 模糊照片 / 相似视频。
+    /// 用于核对列表是否铺满可用高度、底部有无多余空白占位。
+    @MainActor
+    func testCaptureCleanDetailLayout() throws {
+        let app = launchApp()
+        sleep(5)   // 等首页扫描完成，缩略图稳定
+        let pages: [(String, String)] = [
+            ("home.kind.similar_photos", "detail_similar_photos"),
+            ("home.kind.screenshots", "detail_screenshots"),
+            ("home.kind.blurred_photos", "detail_blurred_photos"),
+            ("home.kind.similar_videos", "detail_similar_videos"),
+        ]
+        for (id, name) in pages {
+            let btn = app.buttons[id]
+            var found = btn.waitForExistence(timeout: 4) && btn.isHittable
+            for _ in 0..<3 where !found {
+                app.swipeUp()
+                usleep(400_000)
+                found = btn.exists && btn.isHittable
+            }
+            guard found else { snap(name + "_not_found"); continue }
+            btn.tap()
+            sleep(2)
+            snap(name)
+            if id == "home.kind.similar_photos" {
+                // 长列表滚到底：确认图片能一直铺到底部按钮栏，不再留空白带
+                app.swipeUp(); app.swipeUp(); app.swipeUp()
+                sleep(1)
+                snap(name + "_bottom")
+            }
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            if back.exists { back.tap() } else { app.swipeRight() }
+            sleep(1)
         }
     }
 }

@@ -34,6 +34,7 @@ targets:
       - package: BaseComponents
       - package: CleanKit
       - package: CrashBugly
+      - target: CleanLiveActivityExtension
     info:
       path: FactoryCore-Info.plist
       properties:
@@ -41,16 +42,29 @@ targets:
         # 版本以 settings.MARKETING_VERSION / CURRENT_PROJECT_VERSION 为准（变量展开）
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        UILaunchScreen: {}
+        # 启动屏：底色与开机图 splash.png 一致（浅绿 #8DE3AC），消除「图标出现前闪白」
+        # （Bug表R3：UILaunchScreen 空 {} 时系统启动屏是白屏，与绿色开机图衔接时闪白）
+        UILaunchScreen:
+            UIColorName: launchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSPhotoLibraryAddUsageDescription: 保存素材到你的相册
         NSPhotoLibraryUsageDescription: 扫描相似照片、截图与模糊照片，帮你清理手机空间
+        # ATT（App 跟踪）必需：缺失时调 requestTrackingAuthorization 直接 crash
+        NSUserTrackingUsageDescription: 你的数据将用于广告归因与个性化推荐，不会与第三方共享你的身份信息
         NSSupportsLiveActivities: true
+        # 锁屏实时活动「立即清理」深链（qlzs://clean）
+        CFBundleURLTypes:
+          - CFBundleURLName: com.hxwl.qlzs.clean
+            CFBundleURLSchemes: [qlzs]
     settings:
       base:
         SWIFT_OPTIMIZATION_LEVEL: '-Onone'
         SWIFT_COMPILATION_MODE: 'wholemodule'
+        # xcodegen 新模板 ONLY_ACTIVE_ARCH=NO → 模拟器 destination 双架构半边 x86_64
+        # 找不到 arm64 SwiftPM 模块而报错；真机工程由 factory.py 用 ARCHS=x86_64 构建，
+        # 这里锁 active arch 与其兼容（真机构建 ARCHS=x86_64 时 active arch 即 x86_64）。
+        ONLY_ACTIVE_ARCH: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.hxwl.qlzs
         PRODUCT_NAME: "垃圾清理助手"
         TARGETED_DEVICE_FAMILY: 1
@@ -58,6 +72,8 @@ targets:
         MARKETING_VERSION: "1.1.6"
         CURRENT_PROJECT_VERSION: "35"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        DEVELOPMENT_TEAM: 363GQLCMXG
+        CODE_SIGN_STYLE: Automatic
     # 保险 1（最可靠，不依赖 scheme 缓存）：Release 构建时直接把 Bugly 空壳 dylib 的
     # dSYM 产到 DWARF_DSYM_FOLDER_PATH，Xcode 归档阶段会把该目录下所有 .dSYM 一起收进
     # archive/dSYMs/。GUI（Product > Archive）与命令行归档都生效。
@@ -72,6 +88,32 @@ targets:
           rm -rf "$OUT"
           dsymutil "$FW" -o "$OUT" || true
           echo "[dsym] Bugly.framework.dSYM: $(dwarfdump --uuid "$OUT" 2>/dev/null | awk 'NR==1{print $2}')"
+  # 锁屏实时活动 Widget 扩展（ActivityKit Live Activity 的锁屏/灵动岛 UI）
+  CleanLiveActivityExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.1"     # Live Activity 最低 16.1
+    sources:
+      - Widgets
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: "垃圾清理助手"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hxwl.qlzs.liveactivity
+        PRODUCT_NAME: CleanLiveActivity
+        TARGETED_DEVICE_FAMILY: 1
+        SWIFT_VERSION: "5.9"
+        MARKETING_VERSION: "1.1.6"
+        CURRENT_PROJECT_VERSION: "35"
+        SKIP_INSTALL: YES
+        DEVELOPMENT_TEAM: 363GQLCMXG
+        CODE_SIGN_STYLE: Automatic
 # 共享 scheme：GUI 归档后自动补齐第三方 SDK dSYM（Bugly 空壳 dylib 无调试段，
 # dsymutil 不会为它产 dSYM，App Store 上传会报 "did not include a dSYM"）
 schemes:
@@ -79,8 +121,25 @@ schemes:
     build:
       targets:
         FactoryCore: all
+        CleanLiveActivityExtension: all
+    # 关键：显式把「运行目标」指回主 App。
+    # xcodegen 未指定 executable 时会自动挑一个 app-extension 作为 runnable，
+    # 生成 wasCreatedForAppExtension=YES 的 scheme：Xcode Run 时不去启动 App，
+    # 而是让 SpringBoard 显示该扩展的 Widget（SBAvocadoDebuggingController 取
+    # descriptors）。本扩展只有 ActivityConfiguration（Live Activity）、没有
+    # StaticConfiguration 小组件，取不到 descriptor →
+    # "Failed to show Widget ... Failed to get descriptors for extensionBundleID" (Code=8)
+    # / "Show Notification Center Widget timed out" (Code=32)。
     run:
       config: Debug
+      executable: FactoryCore
+      askForAppToLaunch: false
+    test:
+      config: Debug
+      macroExpansion: FactoryCore
+    profile:
+      config: Release
+      executable: FactoryCore
     archive:
       config: Release
 # 保险 2：archive postAction 再做一次兜底。脚本自包含、不引用工程内文件

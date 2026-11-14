@@ -1,3 +1,4 @@
+import Capabilities
 import CoreKit
 import Photos
 import SwiftUI
@@ -8,6 +9,8 @@ public struct CleanDetailView: View {
     let kind: CleanKind
     let summary: ScanSummary
     let onCleaned: () -> Void          // 清理完成回调（刷新扫描结果）
+    /// 订阅门：未订阅点「清理N项/转为静态」→ 弹订阅页（需求：核心功能拉订阅）
+    var pay: (any PayService)? = nil
 
     @State private var selected: Set<String> = []
     @State private var groupSelection: [String: Bool] = [:]   // 组级全选（相似照片组勾选）
@@ -16,10 +19,12 @@ public struct CleanDetailView: View {
     @State private var showResult = false
     @Environment(\.dismiss) private var dismiss
 
-    public init(kind: CleanKind, summary: ScanSummary, onCleaned: @escaping () -> Void) {
+    public init(kind: CleanKind, summary: ScanSummary, onCleaned: @escaping () -> Void,
+                pay: (any PayService)? = nil) {
         self.kind = kind
         self.summary = summary
         self.onCleaned = onCleaned
+        self.pay = pay
     }
 
     private var groups: [CleanGroup] { summary.groups(for: kind) }
@@ -80,7 +85,8 @@ public struct CleanDetailView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            // 清理成功页自带「继续清理」按钮，不再显示底部主按钮
+            // 清理成功页自带「继续清理」按钮，不再显示底部主按钮。
+            // 整个修饰（含白底）都放在条件内：否则成功页底部会残留一条 24pt 白条。
             if !showResult {
                 CleanPrimaryButton(buttonTitle, enabled: !cleaning && !selectedAssets.isEmpty) { performClean() }
                     .accessibilityIdentifier("detail.primaryAction")
@@ -88,6 +94,11 @@ public struct CleanDetailView: View {
                     .padding(.vertical, 12)
                     .background(Color.white.opacity(0.96))
             }
+        }
+        .alert("无法清理", isPresented: $cleanFailed) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("相册权限被拒绝，无法完成清理。请在系统设置中允许完整访问后重试。")
         }
     }
 
@@ -103,68 +114,107 @@ public struct CleanDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 100)
+        // 不要再在这里加底部外边距：
+        // R10 时为躲常驻 TabBar 加过 140pt，但 R10 修复后二级页已隐藏 TabBar，
+        // 且 safeAreaInset 已为底部按钮预留安全区。外层 padding 会把 ScrollView
+        // 视口压矮（实测 874pt 屏只剩 492pt，底边 616pt，距按钮栏还空 148pt），
+        // 形成下半屏图片永远填不上的空白带。列表所需的尾部间距改放在滚动内容里。
     }
 
-    /// 相似照片/视频：按组卡片（组长「★最佳」，组内勾选）
+    /// 相似照片/视频（Bug表R9-2/9-3）：
+    /// 按天分模板展示——同一天的所有组合并到一个「日期」模板区块内，
+    /// 区块内每组一行（横向左右滑动查看多张），不再每天重复多个卡片头。
     private var similarList: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 12) {
-                ForEach(groups) { group in
-                    groupCard(group)
+                ForEach(daySections, id: \.key) { section in
+                    dayCard(section)
                 }
                 if groups.isEmpty {
                     emptyHint
                 }
             }
-            .padding(.bottom, 10)
+            // 尾部留白放在滚动内容内：既能完整滚出最后一行，又不压缩视口高度
+            .padding(.bottom, 16)
         }
     }
 
-    private func groupCard(_ group: CleanGroup) -> some View {
-        let best = group.assets.first { $0.isBest }
-        let rest = group.assets.filter { !$0.isBest }
-        let groupAllSelected = !rest.isEmpty && rest.allSatisfy { selected.contains($0.id) }
+    /// 按天聚合的组区块
+    private struct DaySection: Identifiable {
+        let key: String          // 「MM月dd日」
+        let groups: [CleanGroup]
+        var id: String { key }
+    }
+
+    private var daySections: [DaySection] {
+        var order: [String] = []
+        var bucket: [String: [CleanGroup]] = [:]
+        for g in groups {
+            let key = dateHeader(g)
+            if bucket[key] == nil { order.append(key) }
+            bucket[key, default: []].append(g)
+        }
+        return order.map { DaySection(key: $0, groups: bucket[$0] ?? []) }
+    }
+
+    /// 单天模板卡：标题行（日期 + 汇总 + 全选该天）→ 每组一行横向滑动缩略图
+    private func dayCard(_ section: DaySection) -> some View {
+        let dayAssets = section.groups.flatMap { $0.assets.filter { !$0.isBest } }
+        let dayAllSelected = !dayAssets.isEmpty && dayAssets.allSatisfy { selected.contains($0.id) }
+        let dayBytes = section.groups.reduce(Int64(0)) { $0 + $1.cleanableBytes }
+        let dayCount = section.groups.reduce(0) { $0 + $1.assets.count }
         return CleanCard {
             VStack(spacing: 10) {
                 HStack(spacing: 8) {
-                    Text(dateHeader(group))
+                    Text(section.key)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color(hex: "1A1A1A"))
-                    Text("\(group.assets.count)项 · \(ByteFormatter.short(group.cleanableBytes))")
+                    Text("\(dayCount)项 · \(ByteFormatter.short(dayBytes))")
                         .font(.system(size: 12))
                         .foregroundStyle(Color(hex: "9AA09C"))
                     Spacer()
                     Button {
-                        if groupAllSelected {
-                            for a in rest { selected.remove(a.id) }
+                        if dayAllSelected {
+                            for a in dayAssets { selected.remove(a.id) }
                         } else {
-                            for a in rest { selected.insert(a.id) }
+                            for a in dayAssets { selected.insert(a.id) }
                         }
                     } label: {
                         HStack(spacing: 4) {
-                            SelectBadge(selected: groupAllSelected)
-                            Text(groupAllSelected ? "取消全选" : "全选")
+                            SelectBadge(selected: dayAllSelected)
+                            Text(dayAllSelected ? "取消全选" : "全选")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Color(hex: "6B7078"))
                         }
                     }
                 }
-                // 网格：最佳占大格，其余小格
-                HStack(spacing: 8) {
-                    if let best {
-                        bestCell(best)
-                    }
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
-                              spacing: 8) {
-                        ForEach(rest) { asset in
-                            thumbCell(asset)
-                        }
-                    }
+                // 每组一行：★最佳 + 其余照片横向滑动（Bug表R9-3）
+                ForEach(section.groups) { group in
+                    groupRow(group)
                 }
-                .frame(height: 150)
             }
             .padding(12)
+        }
+    }
+
+    /// 组内一行：最佳大格 + 其余小格横向滑动
+    private func groupRow(_ group: CleanGroup) -> some View {
+        let best = group.assets.first { $0.isBest }
+        let rest = group.assets.filter { !$0.isBest }
+        return HStack(spacing: 8) {
+            if let best {
+                bestCell(best)
+            }
+            // Bug表R9-3：多张照片左右滑动查看
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 8) {
+                    ForEach(rest) { asset in
+                        thumbCell(asset)
+                            .frame(width: 88, height: 110)
+                    }
+                }
+                .padding(.vertical, 1)
+            }
         }
     }
 
@@ -189,8 +239,10 @@ public struct CleanDetailView: View {
             if isSelected { selected.remove(asset.id) } else { selected.insert(asset.id) }
         } label: {
             ZStack(alignment: .topTrailing) {
+                // Bug表R9-1：约束并裁切，照片内容不再超出范围
                 AssetThumb(assetID: asset.id, isVideo: asset.mediaType == .video)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 SelectBadge(selected: isSelected)
                     .padding(5)
@@ -210,10 +262,11 @@ public struct CleanDetailView: View {
                       spacing: 10) {
                 ForEach(candidates) { asset in
                     thumbCell(asset)
-                    .aspectRatio(0.78, contentMode: .fit)
+                    // Bug表R6：模糊照片/截图清理图片比例改为 1:1（原 0.78 竖长条）
+                    .aspectRatio(1, contentMode: .fit)
                 }
             }
-            .padding(.bottom, 10)
+            .padding(.bottom, 16)
             if candidates.isEmpty {
                 emptyHint.padding(.top, 60)
             }
@@ -242,6 +295,8 @@ public struct CleanDetailView: View {
     // MARK: - 清理动作
 
     private func performClean() {
+        // 订阅门：未订阅拉起订阅页，不放行清理/转换
+        guard !CoreFeatureGate.gate(pay) else { return }
         guard !cleaning else { return }
         let targets = selectedAssets
         guard !targets.isEmpty else { return }
@@ -250,10 +305,19 @@ public struct CleanDetailView: View {
             kind == .livePhotos ? CleanExecutor.shared.convertLiveToStatic : CleanExecutor.shared.clean
         work(targets) { r in
             cleaning = false
+            // Bug表R9-4：系统弹窗点了「不允许」（权限被拒）→ 全部失败时留在当页，
+            // 弹出失败提示；不进入清理成功页（否则用户误以为照片被删）。
+            if r.movedCount == 0 {
+                cleaning = false
+                cleanFailed = true
+                return
+            }
             result = r
             withAnimation(.easeInOut(duration: 0.25)) { showResult = true }
         }
     }
+
+    @State private var cleanFailed = false
 
     // MARK: - 成功页
 

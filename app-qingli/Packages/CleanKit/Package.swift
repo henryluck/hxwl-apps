@@ -14,5 +14,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "CleanKit", dependencies: ["CoreKit", "Capabilities", "BaseComponents"]),
+        .testTarget(name: "CleanKitTests", dependencies: ["CleanKit", "Capabilities"]),
     ]
 )

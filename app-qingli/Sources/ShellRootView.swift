@@ -14,6 +14,8 @@ struct ShellRootView: View {
     @AppStorage("hasPurchasedRetention") private var hasPurchasedRetention = false
     @State private var showPaywall = false
     @State private var showRetention = false       // 挽留诱导页（订阅页关闭后弹）
+    /// 完成订阅页：购买成功后整屏展示（替代原来的「购买成功」弹窗）
+    @State private var showSubscriptionSuccess = false
     @State private var didTriggerPaywall = false   // 防重入：本次启动只触发一次订阅页
     @State private var entitlementReady = false    // isPro 查询完成（启动时等 StoreKit）
     /// 当前选中的 Tab（插件 id；nil 时自动选第一个插件）
@@ -58,7 +60,21 @@ struct ShellRootView: View {
                                    privacyHTML: paywallConfig.privacyHTML,
                                    termsHTML: paywallConfig.termsHTML)
             }
+
+            // 完成订阅页：顶层模态，盖住引导/主界面/挽留页/订阅墙。
+            // 各购买入口只发 proto.subscription.didSucceed 通知，这里统一承接。
+            if showSubscriptionSuccess {
+                ProtoSubscriptionSuccessView {
+                    showSubscriptionSuccess = false
+                    seenPaywall = true
+                    // 「立即清理」→ 直达清理 Tab
+                    TabSwitcher.switchTo("clean_kit")
+                }
+                .transition(.opacity)
+                .zIndex(10)
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: showSubscriptionSuccess)
         .tint(capabilities.theme.accent)
         .task {
             // splash 期间等 isPro 查询就绪（StoreKit 几百 ms）
@@ -81,6 +97,9 @@ struct ShellRootView: View {
                 seenPaywall = false
                 didTriggerPaywall = false
                 hasPurchasedRetention = false
+                // Bug表R4 配套：bootCount 也归零，让测试回到「全新用户」语义
+                // （否则残留 bootCount>=1 会在引导期弹订阅墙盖住引导页）
+                UserDefaults.standard.removeObject(forKey: "appBootCount")
             }
             // 默认选中第一个插件 Tab
             if selectedTab == nil {
@@ -93,6 +112,11 @@ struct ShellRootView: View {
                 seenPaywall = false
                 didTriggerPaywall = false
             }
+            // 启动权限申请：老用户（引导已完成）进主界面即触发
+            // （新用户由下面 finishedOnboarding onChange 在引导走完后触发）
+            if finishedOnboarding {
+                PermissionPrimer.requestStartupPermissionsIfNeeded()
+            }
             // UI 测试钩子：跳过开机引导（截屏对照原型用）。放在 revision 检查之后防止被重置。
             if ProcessInfo.processInfo.arguments.contains("-uitest-skip-onboarding") {
                 lastSeenRevision = spec.revision ?? lastSeenRevision
@@ -100,17 +124,29 @@ struct ShellRootView: View {
                 seenPaywall = true
                 didTriggerPaywall = true
             }
+            // UI 测试钩子：直接展示「完成订阅页」用于截屏对照（无需真实 StoreKit 购买）
+            if ProcessInfo.processInfo.arguments.contains("-uitest-subscription-success") {
+                showSubscriptionSuccess = true
+            }
             tryTriggerPaywall()
         }
         .onChange(of: finishedOnboarding) { done in
             // 引导页走完（含末尾订阅页被关闭）→ 检查 isPro + retention 决定是否弹挽留页（已购挽留不再弹）
             if done {
+                // Bug表R4：首次启动完成 → 落冷启动计数，之后每次冷启动未订阅都补弹订阅墙
+                if UserDefaults.standard.integer(forKey: "appBootCount") == 0 {
+                    UserDefaults.standard.set(1, forKey: "appBootCount")
+                }
                 if capabilities.pay.isPro {
                     seenPaywall = true
                 } else if shouldOfferRetention {
                     DispatchQueue.main.async { showRetention = true }
                 } else {
                     seenPaywall = true
+                }
+                // 启动权限申请：新用户引导走完后触发（主界面出现时申请，系统弹窗不盖引导页）
+                DispatchQueue.main.async {
+                    PermissionPrimer.requestStartupPermissionsIfNeeded()
                 }
             }
         }
@@ -120,9 +156,21 @@ struct ShellRootView: View {
                 selectedTab = target
             }
         }
+        .onOpenURL { url in
+            // 锁屏实时活动卡片「立即清理」深链：qlzs://clean → 切到清理 Tab
+            if url.scheme == "qlzs", url.host == "clean" {
+                finishedOnboarding = true
+                seenPaywall = true
+                TabSwitcher.switchTo("clean_kit")
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .protoOpenPaywall)) { _ in
             // 原型版个人中心「开通会员」→ 统一走壳层订阅墙（关闭后自动接挽留/限时特惠页）
             showPaywall = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ProtoSubscriptionFlow.didSucceed)) { _ in
+            // 购买成功 → 展示「完成订阅页」（购买入口各自收起自己的页面）
+            showSubscriptionSuccess = true
         }
         .fullScreenCover(isPresented: $showPaywall) {
             // 原型版订阅墙（首购/复购按 isIntroEligible 自动切换文案与价格）
@@ -152,52 +200,84 @@ struct ShellRootView: View {
         !finishedOnboarding && !(spec.onboarding?.pages?.isEmpty ?? true)
     }
 
+    /// 冷启动完成计数（Bug表R4）：≥1 表示非首次启动。
+    /// 首次启动由引导末页自带订阅页承接；非首次启动的未订阅用户由 tryTriggerPaywall 补弹。
+    private var bootCount: Int {
+        UserDefaults.standard.integer(forKey: "appBootCount")
+    }
+
     private var mainTabs: some View {
+        // Bug表R7：APP 所有页面都会出现底部首页 tab 栏 —— 根因是 TabView 的系统
+        // tab bar 藏不干净（ ProtoTabBar 只是盖在上面，子页 push 时系统条仍占位/闪现）。
+        // 改为纯 ZStack 页面切换 + 自绘 ProtoTabBar：彻底没有系统 TabBar。
+        // Bug表R10 根因修复：二级页面（插件 push 进 NavigationStack）时隐藏 TabBar，
+        // 否则页面底部按钮被 TabBar 盖住（点「完成，返回」会误触 Tab）。
         ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
-                if spec.plugins.isEmpty {
+            Group {
+                if selectedTab == TabId.settings.rawValue {
+                    makeSettingsTab()
+                } else if selectedTab == TabId.placeholder.rawValue {
                     HomePlaceholderView(appName: spec.identity.name,
                                         theme: capabilities.theme)
-                        .tabItem { Label("首页", systemImage: "house.fill") }
-                        .tag(TabId.placeholder.rawValue)
+                } else if let ref = spec.plugins.first(where: { $0.id == selectedTab }),
+                          let pluginType = PluginRegistry.plugin(for: ref.id) {
+                    pluginEntry(pluginType, ref)
+                } else if let first = spec.plugins.first,
+                          let pluginType = PluginRegistry.plugin(for: first.id) {
+                    pluginEntry(pluginType, first)
                 } else {
-                    ForEach(spec.plugins, id: \.id) { ref in
-                        if let pluginType = PluginRegistry.plugin(for: ref.id),
-                           let entry = pluginType.makeEntryView(context: context(for: ref)) {
-                            entry
-                                .tabItem {
-                                    Label(pluginType.manifest.tabTitle,
-                                          systemImage: pluginType.manifest.tabIcon)
-                                }
-                                .tag(ref.id as String?)
-                        }
-                    }
+                    HomePlaceholderView(appName: spec.identity.name,
+                                        theme: capabilities.theme)
                 }
-
-                // 「我的」Tab：原型版个人中心
-                ProtoSettingsView(appName: spec.identity.name,
-                                  version: "\(spec.identity.version) (\(spec.identity.build))",
-                                  theme: capabilities.theme,
-                                  pay: capabilities.pay,
-                                  review: capabilities.review,
-                                  privacyURL: URL(string: spec.compliance.privacy_url),
-                                  termsURL: URL(string: spec.compliance.terms_url),
-                                  supportEmail: spec.compliance.support_email,
-                                  paywallConfig: paywallConfig,
-                                  support: makeSupportEntries(),
-                                  privacyHTML: spec.compliance.legal?.privacy?.html?.nonEmptyOrNil,
-                                  termsHTML: spec.compliance.legal?.terms?.html?.nonEmptyOrNil,
-                                  zhongtai: capabilities.zhongtai)
-                    .tabItem { Label("个人中心", systemImage: "person.fill") }
-                    .tag(TabId.settings.rawValue)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 0) }
 
-            // 原型版自绘 TabBar（白底、自绘图标、选中浅绿胶囊），盖住系统 TabBar
-            ProtoTabBar(selected: $selectedTab,
-                        tabs: tabItems,
-                        accent: capabilities.theme.accent)
+            // 原型版自绘 TabBar：仅 tab 根页面显示（插件二级页面隐藏）
+            if !isPluginSubpage {
+                ProtoTabBar(selected: $selectedTab,
+                            tabs: tabItems,
+                            accent: capabilities.theme.accent)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: isPluginSubpage)
+        .onReceive(NotificationCenter.default.publisher(for: .pluginSubpageDepth)) { note in
+            let depth = note.userInfo?["depth"] as? Bool ?? false
+            if isPluginSubpage != depth {
+                isPluginSubpage = depth
+            }
+        }
+        .onChange(of: selectedTab) { _ in
+            isPluginSubpage = false   // 切 Tab 回根页面，恢复 TabBar
+        }
+    }
+
+    /// 插件是否处于二级页面（NavigationStack path 非空）
+    @State private var isPluginSubpage = false
+
+    /// 插件 Tab 入口（深度变化走 NotificationCenter.pluginSubpageDepth 通知）
+    @ViewBuilder
+    private func pluginEntry(_ pluginType: any AppPlugin.Type, _ ref: AppSpec.PluginRef) -> some View {
+        if let entry = pluginType.makeEntryView(context: context(for: ref)) {
+            entry
+        }
+    }
+
+    /// 「个人中心」Tab 视图
+    @ViewBuilder
+    private func makeSettingsTab() -> some View {
+        ProtoSettingsView(appName: spec.identity.name,
+                          version: "\(spec.identity.version) (\(spec.identity.build))",
+                          theme: capabilities.theme,
+                          pay: capabilities.pay,
+                          review: capabilities.review,
+                          privacyURL: URL(string: spec.compliance.privacy_url),
+                          termsURL: URL(string: spec.compliance.terms_url),
+                          supportEmail: spec.compliance.support_email,
+                          paywallConfig: paywallConfig,
+                          support: makeSupportEntries(),
+                          privacyHTML: spec.compliance.legal?.privacy?.html?.nonEmptyOrNil,
+                          termsHTML: spec.compliance.legal?.terms?.html?.nonEmptyOrNil,
+                          zhongtai: capabilities.zhongtai)
     }
 
     /// Tab 定义（与 TabView tags 保持一致）
@@ -216,12 +296,36 @@ struct ShellRootView: View {
     private func tryTriggerPaywall() {
         guard entitlementReady, !didTriggerPaywall else { return }
         if capabilities.pay.isPro { return }   // 已订阅 → 什么都不弹
+        // 引导未完成时不在此弹：OnboardingFlow 末页自带 ProtoPaywallView 承接，
+        // 此处再弹会 fullScreenCover 盖住引导页（实测：reset 后 bootCount>=1 的
+        // 状态下订阅墙挡死引导页，测试「下一步不可点」）。
+        if needsOnboarding { return }
         let hasOnboarding = !(spec.onboarding?.pages?.isEmpty ?? true)
-        // 到期未续（有订阅历史但当前非会员）：每次冷启动拉起订阅墙召回；
-        // 全新用户维持原逻辑（首次、无引导页时触发，引导页末尾自带订阅页）
-        if capabilities.pay.hasSubscriptionHistory || (!seenPaywall && !hasOnboarding) {
+        // Bug表R4：未订阅用户每次冷启动都要拉起订阅墙（此前只有「有订阅历史」或
+        // 「首次+无引导页」才弹 → 有引导页的产品二次启动未订阅用户什么都不弹）。
+        // 互斥三路：
+        //   ① 老用户（有订阅历史，含到期未续）→ 每次冷启动召回；
+        //   ② 非首次启动（bootCount>=1）且未订阅 → 补弹（含引导期关闭过订阅页的）；
+        //   ③ 无引导页配置的首启 → 直接弹（没有引导末页订阅页承接）。
+        //   有引导页配置的首启（bootCount==0 && hasOnboarding）→ 不在此弹，
+        //   由引导末页自带的 ProtoPaywallView 承接，避免订阅墙盖住引导页。
+        markBootedIfNeeded()
+        let isFirstLaunchWithOnboarding = hasOnboarding && bootCount == 0
+        if capabilities.pay.hasSubscriptionHistory || bootCount >= 1
+            || (!seenPaywall && !isFirstLaunchWithOnboarding) {
             didTriggerPaywall = true
             DispatchQueue.main.async { showPaywall = true }
+        }
+    }
+
+    /// 首次启动结束时计数置 1（在权益查询后调用，保证第二次启动时已可见）
+    private func markBootedIfNeeded() {
+        if bootCount == 0 {
+            // 首次启动：本次不补弹（引导末页有订阅页），计数在引导完成时落 1；
+            // 若无引导页配置则立即落 1。
+            if spec.onboarding?.pages?.isEmpty ?? true {
+                UserDefaults.standard.set(1, forKey: "appBootCount")
+            }
         }
     }
 

@@ -61,10 +61,13 @@ public struct StorageAnalysisView: View {
                             .background(Capsule().fill(CleanPalette.green))
                     }
                 }
-                HStack {
+                HStack(spacing: 0) {
                     Spacer()
-                    Text("可清理空间 \(ByteFormatter.short(CleanCenter.shared.summary?.totalCleanableBytes ?? 0))")
+                    Text("可清理空间")
                         .font(.system(size: 12))
+                        .foregroundStyle(Color(hex: "1A1A1A"))
+                    Text(" \(ByteFormatter.short(CleanCenter.shared.summary?.totalCleanableBytes ?? 0))")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(CleanPalette.red)
                 }
             }
@@ -92,7 +95,9 @@ public struct StorageAnalysisView: View {
                 }
                 .font(.system(size: 13))
             }
-            .padding(.vertical, 20)
+            // Bug表R8：与「分类占比」卡统一 16pt 内边距，两卡标题左对齐
+            .padding(16)
+            .padding(.vertical, 4)
             .frame(maxWidth: .infinity)
         }
     }

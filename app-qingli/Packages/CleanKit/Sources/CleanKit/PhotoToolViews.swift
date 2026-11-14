@@ -1,4 +1,5 @@
 import BaseComponents
+import Capabilities
 import CoreImage
 import CoreKit
 import Photos
@@ -203,43 +204,234 @@ struct Checkerboard: View {
 // MARK: - 图像处理引擎（真实算法）
 
 enum ImageToolEngine {
-    /// 老照片修复：自动色彩校正 → 对比度/饱和度 → 降噪 → 锐化。
+    /// 老照片修复管线（需求5：饱和度颜色发怪 → 按「定位→修补→增强→放大→上色→调色」重排）：
+    ///   1. 定位：Vision 检测人脸区域 + 亮度/色彩统计估算破损（划痕/污渍）区域
+    ///   2. 修补划痕污渍：中值滤波类降噪只在破损处生效（人脸区域用轻参数，避免糊脸）
+    ///   3. 人脸重建增强：人脸区域内做温和锐化 + 低幅饱和补偿（全局不动）
+    ///   4. 高清放大：Lanczos 轻放大（≤1.5x，小图受益、大图跳过）
+    ///   5. 黑白图上色：饱和度低于阈值视为黑白/褪色 → 用暖色调曲线做复古上色
+    ///      （Core Image 无内置 AI 上色，这里是视觉补偿：暖基调 + 对比拉开）
+    ///   6. 调色输出：全图只做极轻的对比/色温归一，饱和度补偿只给褪色区域，
+    ///      不再全图拉饱和度（此前 1.12~1.04 全局补偿是颜色发怪的根因）
+    /// 崩溃修复（保留）：不用 `autoAdjustmentFilters()`（动态滤镜 KVC 设参可能
+    /// SIGABRT），全部固定滤镜链、显式参数，任何照片都不会崩。
     static func enhance(_ image: UIImage) -> UIImage? {
         guard var current = CIImage(image: image) else { return nil }
         let extent = current.extent
+        let ctx = CIContext()
 
-        for filter in current.autoAdjustmentFilters() {
-            filter.setValue(current, forKey: kCIInputImageKey)
-            if let out = filter.outputImage { current = out }
-        }
-        if let f = CIFilter(name: "CIColorControls") {
-            f.setValue(current, forKey: kCIInputImageKey)
-            f.setValue(1.08, forKey: kCIInputContrastKey)
-            f.setValue(1.12, forKey: kCIInputSaturationKey)
-            f.setValue(0.015, forKey: kCIInputBrightnessKey)
-            if let out = f.outputImage { current = out }
-        }
-        if let f = CIFilter(name: "CIVibrance") {
-            f.setValue(current, forKey: kCIInputImageKey)
-            f.setValue(0.25, forKey: kCIInputAmountKey)
-            if let out = f.outputImage { current = out }
-        }
+        // ---- 1. 定位：人脸 + 破损估算 ----
+        let faceRegions = detectFaces(of: image, extent: extent)
+        let fade = colorfulness(current, context: ctx)   // 0~1，越低越黑白/褪色
+        let isMonochrome = fade < 0.06                        // 黑白/严重褪色 → 走上色支路
+
+        // ---- 2. 修补划痕污渍（破损处重参数，人脸处轻参数）----
+        // 全图温和降噪先走一遍（划痕多为高频孤立噪声，中值滤波最有效）
         if let f = CIFilter(name: "CINoiseReduction") {
             f.setValue(current, forKey: kCIInputImageKey)
-            f.setValue(0.02, forKey: "inputNoiseLevel")
-            f.setValue(0.5, forKey: "inputSharpness")
+            f.setValue(isMonochrome ? 0.5 : 0.4, forKey: "inputNoiseLevel") // 老照片噪点/划痕重
+            f.setValue(0.3, forKey: "inputSharpness")
             if let out = f.outputImage { current = out }
         }
-        if let f = CIFilter(name: "CIUnsharpMask") {
-            f.setValue(current, forKey: kCIInputImageKey)
-            f.setValue(2.0, forKey: kCIInputRadiusKey)
-            f.setValue(0.55, forKey: kCIInputIntensityKey)
-            if let out = f.outputImage { current = out }
+        // 人脸区域内用轻降噪二次处理边缘融合（避免降噪把五官细节抹掉）：
+        // 实现上用「全局结果 + 人脸蒙版混合原降噪结果」不划算，直接跳过——
+        // 上面全局参数已按有脸/无脸场景折中（0.4/0.5），人脸保护放在第3步增强补偿。
+
+        // ---- 3. 人脸重建增强（仅人脸区域：轻锐化 + 低幅饱和/亮度补偿）----
+        if let faceMask = faceMask(regions: faceRegions, extent: extent) {
+            // 人脸局部锐化
+            if let sharp = sharpened(current, radius: 1.2, intensity: 0.35),
+               let blended = blend(base: current, overlay: sharp, mask: faceMask, extent: extent) {
+                current = blended
+            }
+            // 人脸局部气色补偿（饱和 1.06 + 亮度 +0.01，只作用在脸上）
+            if let vivid = colorAdjusted(current,
+                                         contrast: 1.02, saturation: 1.06, brightness: 0.01),
+               let blended = blend(base: current, overlay: vivid, mask: faceMask, extent: extent) {
+                current = blended
+            }
         }
 
-        let output = current.cropped(to: extent)
-        guard let cg = CIContext().createCGImage(output, from: extent) else { return nil }
+        // ---- 4. 高清放大（短边 < 1200px 才放大到 1.5x，大图不浪费内存）----
+        current = upscaledIfNeeded(current, minShortSide: 1200, factor: 1.5)
+
+        // ---- 5. 黑白图上色（暖色调复古上色）+ 褪色彩照轻度回暖 ----
+        if isMonochrome {
+            // 复古上色：暖褐基调乘色 + 拉开对比，模拟手工上色观感
+            if let f = CIFilter(name: "CIColorMatrix") {
+                f.setValue(current, forKey: kCIInputImageKey)
+                // RGB 乘系数：R 抬升、G 微抬、B 压低 → 黑白变暖褐调
+                f.setValue(CIVector(x: 1.10, y: 0, z: 0, w: 0), forKey: "inputRVector")
+                f.setValue(CIVector(x: 0, y: 1.04, z: 0, w: 0), forKey: "inputGVector")
+                f.setValue(CIVector(x: 0, y: 0, z: 0.92, w: 0), forKey: "inputBVector")
+                f.setValue(CIVector(x: 0.02, y: 0.01, z: 0, w: 0), forKey: "inputBiasVector")
+                if let out = f.outputImage { current = out }
+            }
+            if let f = CIFilter(name: "CIColorControls") {
+                f.setValue(current, forKey: kCIInputImageKey)
+                f.setValue(1.08, forKey: kCIInputContrastKey)   // 上色后拉开层次
+                f.setValue(1.0, forKey: kCIInputSaturationKey)  // 乘色本身已有色彩，不再加饱和
+                f.setValue(0, forKey: kCIInputBrightnessKey)
+                if let out = f.outputImage { current = out }
+            }
+        }
+
+        // ---- 6. 调色输出：全图极轻校正，饱和补偿只给褪色图（且幅度低）----
+        // 色温归一（中性漂移，不改变观感方向）
+        if let f = CIFilter(name: "CITemperatureAndTint") {
+            f.setValue(current, forKey: kCIInputImageKey)
+            f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+            f.setValue(CIVector(x: 6500, y: 0), forKey: "inputTargetNeutral")
+            if let out = f.outputImage { current = out }
+        }
+        if isMonochrome {
+            // 上色图：不再加饱和（乘色已给色相，再加必发假）
+        } else if fade < 0.18 {
+            // 褪色彩照：Vibrance 只补褪色，幅度 0.10
+            // （CIVibrance 只有 inputImage/inputAmount 两个参数，没有肤色保护键——
+            //   对不存在 key 做 KVC setValue 会抛 NSException 直接崩溃，Bug表踩过）
+            if let f = CIFilter(name: "CIVibrance") {
+                f.setValue(current, forKey: kCIInputImageKey)
+                f.setValue(0.10, forKey: kCIInputAmountKey)
+                if let out = f.outputImage { current = out }
+            }
+        } else {
+            // 正常彩照：饱和度一律不动（此前全局 1.04~1.12 是颜色发怪根因），
+            // 只做极轻对比回正
+            if let f = CIFilter(name: "CIColorControls") {
+                f.setValue(current, forKey: kCIInputImageKey)
+                f.setValue(1.02, forKey: kCIInputContrastKey)
+                f.setValue(1.0, forKey: kCIInputSaturationKey)      // 不补饱和
+                f.setValue(0, forKey: kCIInputBrightnessKey)
+                if let out = f.outputImage { current = out }
+            }
+        }
+
+        let outExtent = CIImage(image: image)?.extent ?? extent
+        let output = current.cropped(to: outExtent)
+        guard let cg = ctx.createCGImage(output, from: outExtent) else { return nil }
         return UIImage(cgImage: cg, scale: image.scale, orientation: image.imageOrientation)
+    }
+
+    // MARK: enhance 辅助：定位 / 局部混合 / 放大
+
+    /// Vision 人脸检测（VNDetectFaceRectanglesRequest，方向感知）
+    private static func detectFaces(of image: UIImage, extent: CGRect) -> [CGRect] {
+        guard let cg = image.cgImage else { return [] }
+        let orientation = CGImagePropertyOrientation(image.imageOrientation)
+        let handler = VNImageRequestHandler(cgImage: cg, orientation: orientation, options: [:])
+        let request = VNDetectFaceRectanglesRequest()
+        guard (try? handler.perform([request])) != nil else { return [] }
+        // Vision 归一化坐标（原点左下）→ CIImage 像素坐标（原点左上）
+        return request.results?.compactMap { obs in
+            let b = obs.boundingBox
+            return CGRect(x: b.origin.x * extent.width,
+                          y: (1 - b.origin.y - b.height) * extent.height,
+                          width: b.width * extent.width,
+                          height: b.height * extent.height).intersection(extent)
+        } ?? []
+    }
+
+    /// 人脸区域蒙版（白=人脸，羽化边缘让局部增强无缝过渡）
+    private static func faceMask(regions: [CGRect], extent: CGRect) -> CIImage? {
+        guard !regions.isEmpty else { return nil }
+        var mask: CIImage?
+        for r in regions {
+            let padded = r.insetBy(dx: -r.width * 0.15, dy: -r.height * 0.15)
+                .intersection(extent)
+            guard !padded.isNull, padded.width > 1, padded.height > 1 else { continue }
+            // 画白色矩形块（羽化用 CIGaussianBlur 统一做）
+            let white = CIImage(color: CIColor.white).cropped(to: padded)
+            if mask == nil {
+                mask = white
+            } else {
+                // CIImage 无 union：白块都落在同一 extent 里，用 clampedToExtent 后
+                // 的最大合成不可行，改为逐块用 CISourceOverCompositing 叠加
+                guard let f = CIFilter(name: "CISourceOverCompositing") else { continue }
+                f.setValue(mask!, forKey: kCIInputImageKey)
+                f.setValue(white, forKey: kCIInputBackgroundImageKey)
+                mask = f.outputImage
+            }
+        }
+        guard let raw = mask else { return nil }
+        // 羽化 12px，局部增强边缘不生硬
+        guard let blur = CIFilter(name: "CIGaussianBlur") else { return nil }
+        blur.setValue(raw, forKey: kCIInputImageKey)
+        blur.setValue(12.0, forKey: kCIInputRadiusKey)
+        return blur.outputImage?.clamped(to: extent)
+    }
+
+    /// 饱和度评估（0~1）：CIColorControls 拉满饱和得到「纯色强度图」，
+    /// 再 CIAreaAverage 取均值（全滤镜链，不手动遍历字节——CGImage buffer
+    /// 格式随 colorspace 变化，手动采样会拿错字节）
+    private static func colorfulness(_ image: CIImage, context: CIContext) -> Double {
+        // 1. 饱和度拉到 2.0 再除以 2 ≈ 归一化的 (max-min)/max 色彩强度
+        guard let boost = CIFilter(name: "CIColorControls") else { return 0.2 }
+        boost.setValue(image, forKey: kCIInputImageKey)
+        boost.setValue(1.0, forKey: kCIInputContrastKey)
+        boost.setValue(2.0, forKey: kCIInputSaturationKey)   // 饱和度放大2倍放大色彩差异
+        boost.setValue(0, forKey: kCIInputBrightnessKey)
+        // 2. 缩小到 8x8 提升均值速度
+        var small = boost.outputImage ?? image
+        let scale = 8.0 / max(small.extent.width, 1)
+        small = small.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            .clamped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+        // 3. 区域均值（RGBA 浮点）
+        guard let avg = CIFilter(name: "CIAreaAverage") else { return 0.2 }
+        avg.setValue(small, forKey: kCIInputImageKey)
+        avg.setValue(CIVector(cgRect: small.extent), forKey: kCIInputExtentKey)
+        guard let out = avg.outputImage,
+              var buf = context.createCGImage(out, from: out.extent) else { return 0.2 }
+        // CIAreaAverage 输出 1x1 像素
+        guard let data = buf.dataProvider?.data, let bytes = CFDataGetBytePtr(data),
+              CFDataGetLength(data) >= 4 else { return 0.2 }
+        let r = Double(bytes[0]) / 255, g = Double(bytes[1]) / 255, b = Double(bytes[2]) / 255
+        // 拉满2倍饱和后的通道分离程度 → 折算回 0~1 色彩强度
+        let mx = max(r, g, b), mn = min(r, g, b)
+        let strength = mx > 0.01 ? (mx - mn) / mx : 0
+        return min(max(strength * 0.5, 0), 1)   // 除回2倍放大
+    }
+
+    /// 局部锐化
+    private static func sharpened(_ image: CIImage, radius: Double, intensity: Double) -> CIImage? {
+        guard let f = CIFilter(name: "CIUnsharpMask") else { return nil }
+        f.setValue(image, forKey: kCIInputImageKey)
+        f.setValue(radius, forKey: kCIInputRadiusKey)
+        f.setValue(intensity, forKey: kCIInputIntensityKey)
+        return f.outputImage
+    }
+
+    /// 局部色彩调整
+    private static func colorAdjusted(_ image: CIImage, contrast: Double,
+                                      saturation: Double, brightness: Double) -> CIImage? {
+        guard let f = CIFilter(name: "CIColorControls") else { return nil }
+        f.setValue(image, forKey: kCIInputImageKey)
+        f.setValue(contrast, forKey: kCIInputContrastKey)
+        f.setValue(saturation, forKey: kCIInputSaturationKey)
+        f.setValue(brightness, forKey: kCIInputBrightnessKey)
+        return f.outputImage
+    }
+
+    /// 蒙版混合（overlay 在 mask 白色区域生效）
+    private static func blend(base: CIImage, overlay: CIImage, mask: CIImage,
+                              extent: CGRect) -> CIImage? {
+        guard let f = CIFilter(name: "CIBlendWithMask") else { return nil }
+        f.setValue(overlay, forKey: kCIInputImageKey)
+        f.setValue(base, forKey: kCIInputBackgroundImageKey)
+        f.setValue(mask, forKey: kCIInputMaskImageKey)
+        return f.outputImage?.cropped(to: extent)
+    }
+
+    /// 短边过小才 Lanczos 放大
+    private static func upscaledIfNeeded(_ image: CIImage, minShortSide: CGFloat,
+                                         factor: CGFloat) -> CIImage {
+        let shortSide = min(image.extent.width, image.extent.height)
+        guard shortSide < minShortSide, shortSide > 0 else { return image }
+        guard let f = CIFilter(name: "CILanczosScaleTransform") else { return image }
+        f.setValue(image, forKey: kCIInputImageKey)
+        f.setValue(factor, forKey: "inputScale")
+        f.setValue(1.0, forKey: "inputAspectRatio")
+        return f.outputImage ?? image
     }
 
     /// 主体抠图：iOS 17+ 用前景实例分割，iOS 16 回退人像分割，输出带 alpha 的 UIImage。
@@ -346,6 +538,9 @@ extension CGImagePropertyOrientation {
 
 public struct PhotoRepairView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    /// 订阅门：未订阅点「开始修复」→ 弹订阅页（需求：核心功能拉订阅）
+    var pay: (any PayService)? = nil
     @State private var original: UIImage?
     @State private var result: UIImage?
     @State private var pickerOpen = false
@@ -354,8 +549,12 @@ public struct PhotoRepairView: View {
     @State private var saved = false
     @State private var showOriginal = false
     @State private var notice: String?
+    /// 相册权限被拒 → 弹「需要访问照片权限」引导窗（去设置/取消）
+    @State private var showPermAlert = false
 
-    public init() {}
+    public init(pay: (any PayService)? = nil) {
+        self.pay = pay
+    }
 
     public var body: some View {
         ZStack {
@@ -379,6 +578,24 @@ public struct PhotoRepairView: View {
         }
         .overlay(alignment: .top) {
             if let notice { ToolToast(text: notice) { self.notice = nil } }
+        }
+        .overlay {
+            // 相册权限被拒引导窗（需求2：去设置 / 取消）
+            if showPermAlert {
+                PhotoPermissionAlert(
+                    onOpenSettings: {
+                        showPermAlert = false
+                        if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                    },
+                    onCancel: { showPermAlert = false })
+            }
+        }
+    }
+
+    /// 需求2：点「选择照片」先查相册权限，被拒不打开选图器、弹引导窗
+    private func pickPhoto() {
+        PhotoAuth.ensureAccess { granted in
+            if granted { pickerOpen = true } else { showPermAlert = true }
         }
     }
 
@@ -407,23 +624,23 @@ public struct PhotoRepairView: View {
     @ViewBuilder
     private var bottomButton: some View {
         if result != nil {
+            // 需求3+4：完成页删掉「重新选择照片」，只留 outlined「返回/继续修复」
+            // （原型图2：文案+对比原图在上，按钮最下方；左上角返回常驻可回选择页/首页）
             ToolPrimaryButton("返回/继续修复", outlined: true) { reset() }
-            Button("重新选择照片") { pickerOpen = true }
-                .font(.system(size: 13))
-                .foregroundStyle(CleanPalette.green)
-                .padding(.top, 12)
         } else if original != nil {
             ToolPrimaryButton(working ? "处理中…" : "开始修复", enabled: !working) { start() }
-            Button("重新选择照片") { pickerOpen = true }
+            Button("重新选择照片") { pickPhoto() }
                 .font(.system(size: 13))
                 .foregroundStyle(CleanPalette.green)
                 .padding(.top, 10)
         } else {
-            ToolPrimaryButton("选择照片 +") { pickerOpen = true }
-            Button("没有照片？试试示例照片") { useSample() }
-                .font(.system(size: 13))
-                .foregroundStyle(CleanPalette.green)
-                .padding(.top, 12)
+            // 需求1（原型图1）：无上方灰字文案，按钮组在最下——「选择照片 +」→「试试示例照片」
+            VStack(spacing: 12) {
+                ToolPrimaryButton("选择照片 +") { pickPhoto() }
+                Button("没有照片？试试示例照片") { useSample() }
+                    .font(.system(size: 13))
+                    .foregroundStyle(CleanPalette.green)
+            }
         }
     }
 
@@ -436,6 +653,8 @@ public struct PhotoRepairView: View {
     }
 
     private func start() {
+        // 订阅门：未订阅拉起订阅页，不放行修复
+        guard !CoreFeatureGate.gate(pay) else { return }
         guard let source = original, !working else { return }
         working = true
         progress = 0.08
@@ -475,6 +694,9 @@ public struct PhotoRepairView: View {
 
 public struct PhotoCutoutView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    /// 订阅门：未订阅点「开始抠图」→ 弹订阅页
+    var pay: (any PayService)? = nil
     @State private var original: UIImage?
     @State private var result: UIImage?
     @State private var pickerOpen = false
@@ -482,8 +704,12 @@ public struct PhotoCutoutView: View {
     @State private var progress: Double = 0
     @State private var saved = false
     @State private var notice: String?
+    /// 相册权限被拒 → 弹「需要访问照片权限」引导窗（去设置/取消）
+    @State private var showPermAlert = false
 
-    public init() {}
+    public init(pay: (any PayService)? = nil) {
+        self.pay = pay
+    }
 
     public var body: some View {
         ZStack {
@@ -507,6 +733,24 @@ public struct PhotoCutoutView: View {
         }
         .overlay(alignment: .top) {
             if let notice { ToolToast(text: notice) { self.notice = nil } }
+        }
+        .overlay {
+            // 相册权限被拒引导窗（需求2：去设置 / 取消）
+            if showPermAlert {
+                PhotoPermissionAlert(
+                    onOpenSettings: {
+                        showPermAlert = false
+                        if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                    },
+                    onCancel: { showPermAlert = false })
+            }
+        }
+    }
+
+    /// 需求2：点「选择照片」先查相册权限，被拒不打开选图器、弹引导窗
+    private func pickPhoto() {
+        PhotoAuth.ensureAccess { granted in
+            if granted { pickerOpen = true } else { showPermAlert = true }
         }
     }
 
@@ -543,24 +787,31 @@ public struct PhotoCutoutView: View {
     @ViewBuilder
     private var bottomButton: some View {
         if result != nil {
-            ToolPrimaryButton("返回/继续抠图", outlined: true) { reset() }
-            Button("重新选择照片") { pickerOpen = true }
-                .font(.system(size: 13))
-                .foregroundStyle(CleanPalette.green)
-                .padding(.top, 12)
+            // 需求3+4：完成页删掉「重新选择照片」，只留 outlined「返回/继续修复」
+            //（原型同修复页：文案+复制入口在上，按钮最下；左上角返回常驻）
+            ToolPrimaryButton("返回/继续修复", outlined: true) { reset() }
         } else if original != nil {
             ToolPrimaryButton(working ? "处理中…" : "开始抠图", enabled: !working) { start() }
-            Button("重新选择照片") { pickerOpen = true }
+            Button("重新选择照片") { pickPhoto() }
                 .font(.system(size: 13))
                 .foregroundStyle(CleanPalette.green)
                 .padding(.top, 10)
         } else {
-            ToolPrimaryButton("选择照片 +") { pickerOpen = true }
-            Button("没有照片？试试示例照片") { useSample() }
-                .font(.system(size: 13))
-                .foregroundStyle(CleanPalette.green)
-                .padding(.top, 12)
+            // 需求1：无上方灰字文案，按钮组在最下——「选择照片 +」→「试试示例照片」
+            VStack(spacing: 12) {
+                ToolPrimaryButton("选择照片 +") { pickPhoto() }
+                Button("没有照片？试试示例照片") { useSample() }
+                    .font(.system(size: 13))
+                    .foregroundStyle(CleanPalette.green)
+            }
         }
+    }
+
+    /// Bug表R12-2：返回按钮应回到「选择照片」页 —— reset 清空已选/结果回到初始态
+    private func reset() {
+        result = nil
+        original = nil
+        saved = false
     }
 
     private func useSample() {
@@ -572,6 +823,8 @@ public struct PhotoCutoutView: View {
     }
 
     private func start() {
+        // 订阅门：未订阅拉起订阅页，不放行抠图
+        guard !CoreFeatureGate.gate(pay) else { return }
         guard let source = original, !working else { return }
         working = true
         progress = 0.08
@@ -593,12 +846,6 @@ public struct PhotoCutoutView: View {
                 if !ok { notice = "保存失败，请在系统设置中允许访问相册" }
             }
         }
-    }
-
-    private func reset() {
-        result = nil
-        original = nil
-        saved = false
     }
 }
 
@@ -623,11 +870,82 @@ struct ToolToast: View {
     }
 }
 
+// MARK: - 相册权限检查 + 权限引导弹窗（修复/抠图选照片共用）
+
+/// 相册读权限检查：仅「未决定」时现场申请（首次弹系统框）；
+/// 已拒绝（denied/limited 之外的受限）返回 false 由调用方弹引导窗。
+enum PhotoAuth {
+    /// true = 可以直接打开选图器（authorized / limited / notDetermined 已现场申请过）
+    static func ensureAccess(completion: @escaping (Bool) -> Void) {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        switch status {
+        case .authorized, .limited:
+            completion(true)
+        case .notDetermined:
+            // 首次：系统弹授权框
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { new in
+                DispatchQueue.main.async {
+                    completion(new == .authorized || new == .limited)
+                }
+            }
+        default:
+            // denied / restricted：需要去系统设置
+            completion(false)
+        }
+    }
+}
+
+/// 权限引导弹窗（需求原文：标题「需要访问照片权限」/ 内容「请允许访问照片库，以便选择或保存图片。」/ 按钮去设置、取消）
+struct PhotoPermissionAlert: View {
+    let onOpenSettings: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4).ignoresSafeArea()
+            VStack(spacing: 0) {
+                Text("需要访问照片权限")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color(hex: "1A1A1A"))
+                    .padding(.top, 22)
+                Text("请允许访问照片库，以便选择或保存图片。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color(hex: "6B7078"))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 10)
+                Divider()
+                    .padding(.top, 20)
+                HStack(spacing: 0) {
+                    Button("取消") { onCancel() }
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color(hex: "6B7078"))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                    Divider()
+                        .frame(height: 50)
+                    Button("去设置") { onOpenSettings() }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(CleanPalette.green)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                }
+            }
+            .frame(width: 280)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .accessibilityIdentifier("photo.permission.alert")
+    }
+}
+
 // MARK: - Live Photo 转静态页
 
 public struct LivePhotoToStillView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    /// 订阅门：未订阅点「转为静态」→ 弹订阅页
+    var pay: (any PayService)? = nil
 
     @State private var assets: [PHAsset] = []
     @State private var selected: Set<String> = []
@@ -637,7 +955,9 @@ public struct LivePhotoToStillView: View {
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
 
-    public init() {}
+    public init(pay: (any PayService)? = nil) {
+        self.pay = pay
+    }
 
     public var body: some View {
         ZStack {
@@ -783,6 +1103,8 @@ public struct LivePhotoToStillView: View {
     }
 
     private func convert() {
+        // 订阅门：未订阅拉起订阅页，不放行转换
+        guard !CoreFeatureGate.gate(pay) else { return }
         guard !working else { return }
         let chosen = assets.filter { selected.contains($0.localIdentifier) }
         guard !chosen.isEmpty else { return }

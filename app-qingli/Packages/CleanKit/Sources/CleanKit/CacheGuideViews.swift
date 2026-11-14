@@ -96,21 +96,37 @@ public struct CacheGuideListView: View {
 /// 底部提供真实动作：复制操作路径、尝试打开该 App、完成返回。
 public struct CacheGuideDetailView: View {
     let app: CacheApp
-
-    @Environment(\.dismiss) private var dismiss
+    /// 返回动作：由宿主 NavigationStack 传入（显式 path.pop 只退一层）。
+    /// 不用 @Environment(\.dismiss)：在 Group 条件切换的 Tab 结构下它会退到 tab 根、
+    /// 甚至触发外层 presentation，把整个百宝箱栈退掉直接回首页。
+    var onBack: () -> Void = {}
     @State private var toast: String?
 
-    public init(app: CacheApp) {
+    public init(app: CacheApp, onBack: @escaping () -> Void = {}) {
         self.app = app
+        self.onBack = onBack
     }
 
     public var body: some View {
         ZStack {
             CleanPalette.pageBackground.ignoresSafeArea()
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 18) {
-                    ForEach(Array(steps.enumerated()), id: \.offset) { idx, step in
-                        stepCard(idx: idx, title: step.title, desc: step.desc)
+                VStack(spacing: 16) {
+                    // 需求：直接用原型整页长图（含步骤标题/手机截图/红框/箭头标注），
+                    // 替代分步卡片 + 自绘标注——与原型完全一致且高清。
+                    if let img = ProtoToolAsset.image("guide_full/\(app.rawValue)_full.jpg") {
+                        CleanCard {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                    } else {
+                        // 兜底：整页长图缺失时退回分步卡片
+                        ForEach(Array(steps.enumerated()), id: \.offset) { idx, step in
+                            stepCard(idx: idx, title: step.title, desc: step.desc)
+                        }
                     }
                     tipCard
                     actionCard
@@ -125,7 +141,7 @@ public struct CacheGuideDetailView: View {
         .toolbarBackground(CleanPalette.navBarGreen, for: .navigationBar)
         .toolbarColorScheme(.light, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
-            ToolPrimaryButton("完成，返回") { dismiss() }
+            ToolPrimaryButton("完成，返回") { onBack() }
                 .padding(.vertical, 12)
                 .background(Color.white.opacity(0.94))
         }
@@ -162,6 +178,12 @@ public struct CacheGuideDetailView: View {
                         .scaledToFit()
                         .frame(maxWidth: 260)
                         .frame(maxWidth: .infinity, alignment: .center)
+                        .overlay {
+                            // Bug表R14：红框 + 指引箭头标注
+                            if let spot = GuideSpot.rect(app: app.rawValue, step: idx + 1) {
+                                GuideAnnotation(rect: spot)
+                            }
+                        }
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 Text(desc)
@@ -267,3 +289,93 @@ extension CacheApp {
         }
     }
 }
+
+// MARK: - 指引步骤截图标注（Bug表R14：加红框 + 指引箭头）
+//
+// 高清截图来自原型 SVG 内嵌位图，本身无标注层。这里按「app-step」配置
+// 归一化标注区域（0~1 相对截图坐标），绘制红色圆角框 + 上方箭头提示。
+// 坐标依据对截图内容的目视测量（1216x2640 原图）。
+
+struct GuideAnnotation: View {
+    /// 标注区域（归一化）：x/y/w/h 相对截图尺寸
+    let rect: CGRect
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            ZStack(alignment: .topLeading) {
+                // 红色圆角框（虚线描边）
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.red, style: StrokeStyle(lineWidth: 2.5, dash: [6, 4]))
+                    .frame(width: rect.width * w, height: rect.height * h)
+                    .offset(x: rect.minX * w, y: rect.minY * h)
+                // 上方箭头（向下指向框顶）
+                VStack(spacing: 0) {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.red)
+                        .shadow(color: .white.opacity(0.9), radius: 2, x: 0, y: 0)
+                    Triangle()
+                        .fill(.red)
+                        .frame(width: 12, height: 7)
+                        .shadow(color: .white.opacity(0.9), radius: 2, x: 0, y: 0)
+                }
+                .position(x: (rect.minX + rect.width / 2) * w,
+                          y: max(rect.minY * h - 16, 10))
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    struct Triangle: Shape {
+        func path(in r: CGRect) -> Path {
+            var p = Path()
+            p.move(to: CGPoint(x: r.minX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
+            p.closeSubpath()
+            return p
+        }
+    }
+}
+
+enum GuideSpot {
+    /// app-step → 标注区域（归一化坐标，目视测量）
+    static func rect(app: String, step: Int) -> CGRect? {
+        // 全部按 1216x2640 归一。x: 0左 1右；y: 0顶 1底
+        switch (app, step) {
+        // 微信：1=「我」tab(右下)；2=设置(菜单中部)
+        case ("wechat", 1): return CGRect(x: 0.80, y: 0.92, width: 0.16, height: 0.055)
+        case ("wechat", 2): return CGRect(x: 0.06, y: 0.52, width: 0.88, height: 0.05)
+        // QQ：1=头像/左上进入设置路径提示（侧栏）；2=通用/存储位置相关菜单项
+        case ("qq", 1):     return CGRect(x: 0.62, y: 0.10, width: 0.32, height: 0.12)
+        case ("qq", 2):     return CGRect(x: 0.06, y: 0.20, width: 0.88, height: 0.05)
+        // 抖音：1=底部「我」tab(右下)；2=右上三横菜单；3=设置项「清理占用空间」
+        case ("douyin", 1): return CGRect(x: 0.84, y: 0.93, width: 0.13, height: 0.05)
+        case ("douyin", 2): return CGRect(x: 0.02, y: 0.06, width: 0.16, height: 0.06)
+        case ("douyin", 3): return CGRect(x: 0.06, y: 0.16, width: 0.88, height: 0.05)
+        // 快手：1=底部「我」；2=侧边菜单「设置」
+        case ("kuaishou", 1): return CGRect(x: 0.84, y: 0.93, width: 0.13, height: 0.05)
+        case ("kuaishou", 2): return CGRect(x: 0.06, y: 0.62, width: 0.88, height: 0.05)
+        // 小红书：1=底部「我」；2=设置菜单项
+        case ("xiaohongshu", 1): return CGRect(x: 0.80, y: 0.92, width: 0.16, height: 0.055)
+        case ("xiaohongshu", 2): return CGRect(x: 0.06, y: 0.30, width: 0.88, height: 0.05)
+        // 拼多多：设置里的「清除缓存」类目
+        case ("pinduoduo", 1): return CGRect(x: 0.06, y: 0.72, width: 0.88, height: 0.05)
+        case ("pinduoduo", 2): return CGRect(x: 0.06, y: 0.42, width: 0.88, height: 0.05)
+        // 淘宝：设置菜单
+        case ("taobao", 1): return CGRect(x: 0.06, y: 0.20, width: 0.88, height: 0.05)
+        case ("taobao", 2): return CGRect(x: 0.06, y: 0.40, width: 0.88, height: 0.05)
+        case ("taobao", 3): return CGRect(x: 0.06, y: 0.58, width: 0.88, height: 0.05)
+        // 腾讯视频/优酷/爱奇艺：设置内清理缓存项
+        case ("tencentVideo", 1): return CGRect(x: 0.06, y: 0.18, width: 0.88, height: 0.05)
+        case ("tencentVideo", 2): return CGRect(x: 0.06, y: 0.55, width: 0.88, height: 0.05)
+        case ("youku", 1): return CGRect(x: 0.06, y: 0.15, width: 0.88, height: 0.05)
+        case ("youku", 2): return CGRect(x: 0.06, y: 0.30, width: 0.88, height: 0.05)
+        case ("iqiyi", 1): return CGRect(x: 0.06, y: 0.22, width: 0.88, height: 0.05)
+        case ("iqiyi", 2): return CGRect(x: 0.06, y: 0.68, width: 0.88, height: 0.05)
+        default: return nil
+        }
+    }
+}
+

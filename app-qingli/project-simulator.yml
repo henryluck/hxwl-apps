@@ -43,6 +43,7 @@ targets:
       - package: Capabilities
       - package: BaseComponents
       - package: CleanKit
+      - target: CleanLiveActivityExtension
     info:
       path: FactoryCoreSim-Info.plist
       properties:
@@ -50,16 +51,31 @@ targets:
         # 版本以 settings.MARKETING_VERSION / CURRENT_PROJECT_VERSION 为准（变量展开）
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        UILaunchScreen: {}
+        # 启动屏底色与开机图 splash.png 一致（浅绿 #8DE3AC），消除图出现前闪白
+        UILaunchScreen:
+            UIColorName: launchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSPhotoLibraryAddUsageDescription: 保存素材到你的相册
         NSPhotoLibraryUsageDescription: 扫描相似照片、截图与模糊照片，帮你清理手机空间
+        # ATT（App 跟踪）必需：缺失时调 requestTrackingAuthorization 直接 crash
+        NSUserTrackingUsageDescription: 你的数据将用于广告归因与个性化推荐，不会与第三方共享你的身份信息
         NSSupportsLiveActivities: true
+        # 锁屏实时活动「立即清理」深链（qlzs://clean）
+        CFBundleURLTypes:
+          - CFBundleURLName: com.hxwl.qlzs.clean
+            CFBundleURLSchemes: [qlzs]
     settings:
       base:
         SWIFT_OPTIMIZATION_LEVEL: '-Onone'
         SWIFT_COMPILATION_MODE: 'wholemodule'
+        # Xcode 26 显式模块构建（-explicit-module-build）扫描不到本地 SPM 包依赖
+        # （xcodegen 重新生成的工程在扫描阶段报 Unable to find module dependency），
+        # 关闭后回退经典模块编译路径，本地包经 Frameworks phase 正常解析。
+        SWIFT_ENABLE_EXPLICIT_MODULES: NO
+        # 只编 active arch：模拟器 destination 是 arm64（Xcode 26 iOS 26 运行时无 x86_64）。
+        # xcodegen 新模板默认 ONLY_ACTIVE_ARCH=NO → 双架构半边的 x86_64 找不到 arm64 模块报错。
+        ONLY_ACTIVE_ARCH: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.hxwl.qlzs
         PRODUCT_NAME: "垃圾清理助手"
         TARGETED_DEVICE_FAMILY: 1
@@ -77,6 +93,53 @@ targets:
       - target: FactoryCoreSim
     settings:
       base:
+        SWIFT_VERSION: "5.9"
+        PRODUCT_NAME: "$(TARGET_NAME)"
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: FactoryCoreSim
         PRODUCT_BUNDLE_IDENTIFIER: com.hxwl.qlzs.uitests
+  # 锁屏实时活动 Widget 扩展（ActivityKit Live Activity 的锁屏/灵动岛 UI）
+  CleanLiveActivityExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.1"     # Live Activity 最低 16.1
+    sources:
+      - Widgets
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: "垃圾清理助手"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hxwl.qlzs.liveactivity
+        PRODUCT_NAME: CleanLiveActivity
+        TARGETED_DEVICE_FAMILY: 1
+        SWIFT_VERSION: "5.9"
+        MARKETING_VERSION: "1.1.6"
+        CURRENT_PROJECT_VERSION: "35"
+        SKIP_INSTALL: YES
+schemes:
+  FactoryCoreSim:
+    build:
+      targets:
+        FactoryCoreSim: all
+        CleanLiveActivityExtension: all
+    # 显式指定 runnable 为主 App：否则 xcodegen 会把 LaunchAction 指到
+    # CleanLiveActivity.appex，Xcode Run 时尝试在通知中心显示 Widget 并报
+    # "Failed to get descriptors for extensionBundleID"（Live Activity 扩展没有普通 Widget descriptor）。
+    run:
+      config: Debug
+      executable: FactoryCoreSim
+      askForAppToLaunch: false
+    test:
+      config: Debug
+      targets:
+        - FactoryCoreSimUITests
+      macroExpansion: FactoryCoreSim
+    profile:
+      config: Release
+      executable: FactoryCoreSim

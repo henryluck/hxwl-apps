@@ -27,7 +27,8 @@ final class FeatureFlowTests: XCTestCase {
     @MainActor
     private func launchApp() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-reset-onboarding", "-uitest-skip-onboarding"]
+        // -uitest-pro：绕过订阅门（本用例测算法链路，非付费墙本身）
+        app.launchArguments = ["-uitest-reset-onboarding", "-uitest-skip-onboarding", "-uitest-pro"]
         app.launch()
 
         // 系统照片权限弹窗挂在 SpringBoard，需要跨应用查询

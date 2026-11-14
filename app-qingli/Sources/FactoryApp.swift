@@ -42,7 +42,8 @@ struct FactoryApp: App {
     private let spec: AppSpec
     private let capabilities: CapabilitySet
     @StateObject private var pay: AnyPayService
-    @State private var showSplash: Bool
+    /// 启动序列是否在进行中（图 + 视频共用一个不透明容器，见 body）
+    @State private var showSplashSequence: Bool
     @State private var showVideo: Bool
 
     init() {
@@ -76,7 +77,8 @@ struct FactoryApp: App {
         }
         let pay = AnyPayService(inner)   // 具体类型承载，满足 @StateObject / environmentObject
         _pay = StateObject(wrappedValue: pay)
-        _showSplash = State(initialValue: spec.onboarding?.splash != nil)
+        _showSplashSequence = State(initialValue: spec.onboarding?.splash != nil
+                                    || spec.onboarding?.splash_video != nil)
         _showVideo = State(initialValue: false)
 
         // 集成装配：provider 路由 + #if canImport 选实现
@@ -166,32 +168,49 @@ struct FactoryApp: App {
                 ShellRootView(spec: spec, capabilities: capabilities)
                     .environmentObject(pay)
 
-                // 启动序列：开机图 →（可选）开机视频 → 主界面
-                // 苹果启动页只能静态图，视频在 App 内用 AVPlayer 播，与图无缝拼接。
-                if let splash = spec.onboarding?.splash, showSplash {
-                    SplashView(image: splash, theme: capabilities.theme)
-                        .transition(.opacity)
-                }
-                if let video = spec.onboarding?.splash_video, showVideo {
-                    SplashVideoView(path: video, theme: capabilities.theme) {
-                        // 视频播完：淡出进主界面
-                        withAnimation(.easeOut(duration: 0.4)) {
-                            showVideo = false
+                // 启动序列：整段是**一个不透明层**，内部「开机图 → 开机视频」直接叠放。
+                // 闪白修复要点：
+                //   ① 图与视频不再各自做 0.4s 交叉 opacity 过渡 —— 两个半透明层叠在
+                //      白色主界面上，中间时刻合成不透明度 < 1，会透出白底；
+                //   ② 容器底部常驻开机图，视频首帧未就绪时整层透明，露出的仍是开机图；
+                //   ③ 只有整个序列结束时容器才统一淡出到主界面。
+                if showSplashSequence {
+                    ZStack {
+                        if let splash = spec.onboarding?.splash {
+                            SplashView(image: splash, theme: capabilities.theme)
+                        } else {
+                            capabilities.theme.colors.bgPage.ignoresSafeArea()
+                        }
+                        if let video = spec.onboarding?.splash_video, showVideo {
+                            SplashVideoView(path: video, theme: capabilities.theme) {
+                                finishSplashSequence()
+                            }
                         }
                     }
                     .transition(.opacity)
                 }
             }
             .task {
-                guard spec.onboarding?.splash != nil else { return }
+                guard showSplashSequence else { return }
+                // 无开机图但有视频：跳过静态图阶段，直接播视频
+                guard spec.onboarding?.splash != nil else {
+                    showVideo = true
+                    return
+                }
                 try? await Task.sleep(for: .seconds(1.5))
-                // 有开机视频：图淡出 → 切视频阶段；无视频：图淡出直接进主界面
-                let hasVideo = spec.onboarding?.splash_video != nil
-                withAnimation(.easeOut(duration: 0.4)) {
-                    showSplash = false
-                    if hasVideo { showVideo = true }
+                if spec.onboarding?.splash_video != nil {
+                    showVideo = true            // 无动画：直接叠到常驻开机图之上
+                } else {
+                    finishSplashSequence()
                 }
             }
+        }
+    }
+
+    /// 序列结束：整层（开机图 + 视频）一起淡出，避免视频层先消失又闪回静态图
+    private func finishSplashSequence() {
+        withAnimation(.easeOut(duration: 0.4)) {
+            showSplashSequence = false
         }
     }
 }

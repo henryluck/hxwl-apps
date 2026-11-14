@@ -13,6 +13,8 @@ public final class CleanScanner: ObservableObject {
     /// 扫描进度（0~1），驱动首页/建议页进度条
     @Published public private(set) var progress: Double = 0
     @Published public private(set) var phaseLabel: String = ""
+    /// 是否有扫描进行中（供深度扫描页观察首页已起的扫描）
+    @Published public private(set) var isScanning = false
 
     /// 扫描全部类别。completed 在主线程回调。
     /// 重活（遍历/文件大小/模糊检测）全部在后台线程，仅进度与结果回主线程。
@@ -20,12 +22,14 @@ public final class CleanScanner: ObservableObject {
                         completed: @escaping @MainActor (ScanSummary) -> Void) {
         progress = 0
         phaseLabel = "正在准备…"
+        isScanning = true
         let scanner = CleanScanner.shared
         Task.detached(priority: .userInitiated) {
             let summary = await scanner.performScan(kinds: kinds)
             await MainActor.run {
                 self.phaseLabel = ""
                 self.progress = 1
+                self.isScanning = false
                 completed(summary)
             }
         }

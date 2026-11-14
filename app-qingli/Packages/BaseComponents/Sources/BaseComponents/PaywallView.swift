@@ -80,7 +80,7 @@ public struct PaywallView: View {
     @State private var purchasing = false
     @State private var purchaseError: String?      // 购买失败提示（nil=不显示）
     @State private var restoreMessage: String?     // 恢复购买结果提示（nil=不显示）
-    @State private var purchaseSuccess = false     // 购买成功：弹提示，用户确认后退出订阅墙
+    // 购买成功不再弹提示：发通知由壳层统一展示「完成订阅页」
     @State private var legalDoc: LegalKind?        // 协议弹窗（隐私政策/用户协议，nil=不显示）
 
     public init(config: PaywallConfig, theme: any ThemeService, pay: any PayService,
@@ -123,11 +123,6 @@ public struct PaywallView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(restoreMessage ?? "")
-        }
-        .alert("订阅成功", isPresented: $purchaseSuccess) {
-            Button("好") { closePaywall() }
-        } message: {
-            Text("已解锁全部高级功能，感谢支持")
         }
         .sheet(item: $legalDoc) { kind in
             // 合规功能链接：优先在线政策页（SFSafariViewController 应用内浏览），
@@ -306,9 +301,11 @@ public struct PaywallView: View {
             Task {
                 do {
                     try await pay.purchase()
-                    // 购买成功 → 弹「订阅成功」提示，用户确认后再退出订阅墙。
-                    // 不能直接 dismiss：dismiss 会连带销毁本视图上的 alert，提示根本看不到。
-                    if pay.isPro { purchaseSuccess = true }
+                    // 购买成功 → 壳层统一展示「完成订阅页」（整屏），然后收起订阅墙
+                    if pay.isPro {
+                        ProtoSubscriptionFlow.notifySuccess()
+                        closePaywall()
+                    }
                 } catch {
                     // 展示映射后的中文文案（StoreKitError.unknown 原文是英文
                     // "Unable to Complete Request"，审核曾因此被拒）
@@ -400,7 +397,7 @@ public struct PaywallView: View {
     // MARK: - 关闭按钮（始终可用）
 
     /// 统一关闭订阅墙：外层接管（开机引导走 onFinish）时调 onClose，否则走 dismiss。
-    /// 购买成功提示确认后与左上角 ✕ 共用此出口。
+    /// 购买成功（先发通知展示完成订阅页）与左上角 ✕ 共用此出口。
     private func closePaywall() {
         if let onClose { onClose() } else { dismiss() }
     }

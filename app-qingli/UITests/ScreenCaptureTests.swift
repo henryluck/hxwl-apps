@@ -87,9 +87,11 @@ final class ScreenCaptureTests: XCTestCase {
             back(app)
         }
 
-        // MARK: 智能清理建议
+        // MARK: 智能清理建议（一键智能清理 → 深度扫描页 → 完成后自动跳转建议页）
         if tapID(app, "home.primaryAction") {
-            sleep(2)
+            // 等待深度扫描完成并自动跳转（建议页导航栏出现即视为到位）
+            _ = app.navigationBars["智能清理建议"].waitForExistence(timeout: 40)
+            sleep(1)
             attach(app, "06-智能清理建议")
             back(app)
         }

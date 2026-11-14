@@ -65,21 +65,28 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
     @Published public private(set) var purchaseInProgress = false
     /// StoreKit 真实展示价（订阅页优先用，未加载则回退 spec 配置价）。
     /// 首期价：取主商品的 introductory offer（首期优惠统一走 ASC introductory offer）。
-    /// 仅当 App Store 店面为中国大陆（CHN）时才返回 StoreKit 真实价；
-    /// 非中国店面（如美区沙盒账号测试）返回 nil，订阅页回退 spec 配置价 —— 统一显示 ¥，避免出现 US$ 等外币。
-    /// 生产环境中国店面仍与 ASC 改价保持同步。
+    /// 产品要求：订阅页价格**统一人民币展示，不随手机语言/国家（App Store 店面）变化**。
+    /// StoreKit 的 displayPrice 按店面结算货币格式化（美区 US$、日区 JP¥ 等），
+    /// 故仅当「店面=中国大陆(CHN) 且 商品结算货币=CNY」时才采用真实价（与 ASC 改价同步）；
+    /// 其余语言/国家一律返回 nil，订阅页回退 spec 配置价（¥8/¥48）—— 任何店面都显示人民币。
     public var introDisplayPrice: String? {
-        guard isChinaStorefront else { return nil }
+        guard isChinaStorefront, isCNYBilling else { return nil }
         return products[productID]?.subscription?.introductoryOffer?.displayPrice
     }
     public var renewDisplayPrice: String? {
-        guard isChinaStorefront else { return nil }
+        guard isChinaStorefront, isCNYBilling else { return nil }
         return products[productID]?.displayPrice
     }
 
+    /// 当前店面结算货币是否人民币：取商品价格格式样式里的真实货币代码（iOS 15+）。
+    /// 未加载/取不到视为非 CNY → 走配置价，宁可显示稳定的人民币配置价也不用外币。
+    private var isCNYBilling: Bool {
+        products[productID]?.priceFormatStyle.currencyCode == "CNY"
+    }
+
     /// 当前 App Store 店面是否为中国大陆（结算货币为人民币 CNY 的唯一店面）。
-    /// StoreKit 的 displayPrice 按店面格式化，非中国店面会产出 US$ 等外币，此时放弃真实价、回退配置价（¥）。
-    /// Storefront.current 是 async，故在 loadProducts 中拉取后缓存到 storefrontCountryCode，供同步计算属性读取。
+    /// displayPrice 按店面结算货币格式化，仅中国店面能产出人民币价，其余回退配置价（¥）。
+    /// Storefront.current 是 async，故在 loadProducts 中拉取后缓存，供同步计算属性读取。
     private var isChinaStorefront: Bool {
         storefrontCountryCode == "CHN"
     }
@@ -147,7 +154,8 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
             print("[Pay] ❌ loadProducts error: \(error)")
         }
         product = products[productID]   // 常规商品（订阅页回退/续费用）
-        // 缓存店面区域：displayPrice 按店面格式化，订阅页据「是否中国店面」决定用 StoreKit 真实价还是配置价 ¥
+        // 缓存店面区域：订阅页价格统一人民币 —— 仅「中国店面 + 商品 CNY 结算」用 StoreKit
+        // 真实价（与 ASC 改价同步），其余手机语言/国家一律回退 spec 配置价 ¥8/¥48
         storefrontCountryCode = await Storefront.current?.countryCode
         await refreshIntroEligibility()
     }

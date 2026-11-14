@@ -1,0 +1,21 @@
+# 构建产物
+DerivedData*/
+build/
+dist/
+*.xcresult/
+TestResults*/
+.swiftpm/
+.build/
+
+# Xcode 本地状态（scheme 共享配置需保留）
+**/xcuserdata/
+*.xcuserstate
+**/xcshareddata/swiftpm/
+**/xcshareddata/xcschememanagement.plist
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 工作区运行时数据（非源码）
+.workbuddy-ai/

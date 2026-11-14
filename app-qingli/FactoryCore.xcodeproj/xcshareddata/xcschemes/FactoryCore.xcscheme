@@ -14,6 +14,20 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "1AC0F0E55119B45F622B2BAE"
+               BuildableName = "CleanLiveActivity.appex"
+               BlueprintName = "CleanLiveActivityExtension"
+               ReferencedContainer = "container:FactoryCore.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "E2DBB0BE28C64DCF66C159CB"
                BuildableName = "&#x5783;&#x573e;&#x6e05;&#x7406;&#x52a9;&#x624b;.app"
                BlueprintName = "FactoryCore"

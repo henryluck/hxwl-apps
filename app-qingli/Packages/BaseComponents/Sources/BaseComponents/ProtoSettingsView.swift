@@ -28,7 +28,7 @@ public struct ProtoSettingsView: View {
     let zhongtai: any ZhongtaiService
 
     @Environment(\.openURL) private var openURL
-    @State private var showPaywall = false
+    @State private var showSubscribed = false
     @State private var legalDoc: LegalDoc?
     @State private var path = NavigationPath()
     @State private var toast: String?
@@ -61,8 +61,11 @@ public struct ProtoSettingsView: View {
         self.zhongtai = zhongtai
     }
 
-    /// 展示态：只跟随真实订阅状态（不再有原型里的调试切换按钮）
-    private var showMemberState: Bool { pay.isPro }
+    /// 展示态：只跟随真实订阅状态（不再有原型里的调试切换按钮）。
+    /// -uitest-proto-subscribed 仅用于 UI 截屏测试，强制呈现已订阅卡片。
+    private var showMemberState: Bool {
+        pay.isPro || ProcessInfo.processInfo.arguments.contains("-uitest-proto-subscribed")
+    }
 
     private let cardGreenTop = Color(hex: "234E31")
     private let cardGreenBottom = Color(hex: "51B471")
@@ -73,10 +76,13 @@ public struct ProtoSettingsView: View {
             ZStack {
                 // 页面背景：白底 + 顶部浅绿渐变
                 Color.white.ignoresSafeArea()
+                // Bug表R15-1：背景渐变从屏幕最顶端铺起（此前渐变 frame 固定 420 高、
+                // 从安全区顶部起算 → 上半部分留白、背景错位）
                 LinearGradient(colors: [Color(hex: "8DE3AC").opacity(0.55), Color(hex: "F2F2F2").opacity(0.2)],
                                startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
-                    .frame(height: 420, alignment: .top)
+                    .frame(height: 460)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .ignoresSafeArea(edges: .top)
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
@@ -118,8 +124,15 @@ public struct ProtoSettingsView: View {
                         }
                 }
             }
-            .fullScreenCover(isPresented: $showPaywall) {
-                ProtoPaywallView(config: paywallConfig, theme: theme, pay: pay)
+            // 「管理订阅」→ 应用内「已订阅页」（不再直接跳系统设置）；
+            // 页内「取消续费」再弹「续订弹窗」。
+            .fullScreenCover(isPresented: $showSubscribed) {
+                ProtoSubscribedView(
+                    onClose: { showSubscribed = false },
+                    onContinue: {
+                        showSubscribed = false
+                        TabSwitcher.switchTo("clean_kit")
+                    })
             }
             .sheet(item: $legalDoc) { doc in
                 NavigationStack {
@@ -224,9 +237,7 @@ public struct ProtoSettingsView: View {
                 .padding(.top, 10)
 
             Button {
-                if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
-                    openURL(url)
-                }
+                showSubscribed = true
             } label: {
                 Text("管理订阅")
                     .font(.system(size: 15, weight: .semibold))

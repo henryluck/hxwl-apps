@@ -222,8 +222,9 @@ public struct ProtoFeedbackView: View {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color(hex: "F5F6F7"))
+                // 用户要求：删掉建议例子 placeholder，只留空白输入区
                 if content.isEmpty {
-                    Text("例如：扫描相似照片时…（\(maxLength) 字以内）")
+                    Text("请描述您遇到的问题或建议")
                         .font(.system(size: 13))
                         .foregroundStyle(Color(hex: "B4B8BC"))
                         .padding(.horizontal, 10)
@@ -242,6 +243,15 @@ public struct ProtoFeedbackView: View {
                 .accessibilityIdentifier("feedback.content")
             }
             .frame(height: 148)
+            // 用户要求：字数计数放内容灰框右下角（框内）
+            .overlay(alignment: .bottomTrailing) {
+                Text("\(content.count)/\(maxLength)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(hex: "B4B8BC"))
+                    .padding(.trailing, 10)
+                    .padding(.bottom, 6)
+                    .allowsHitTesting(false)
+            }
 
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("联系方式：")
@@ -254,13 +264,12 @@ public struct ProtoFeedbackView: View {
                     .autocorrectionDisabled()
                     .focused($focusedField, equals: .contact)
                     .accessibilityIdentifier("feedback.contact")
-                Text("\(content.count)/\(maxLength)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(hex: "B4B8BC"))
+                Spacer(minLength: 8)
             }
+            // Bug表R15-2：字数计数与「联系方式」无关（500 上限只针对内容框），
+            // 从联系方式行移除，避免误导（原「0/500」尾随在联系方式输入后）
             .overlay(alignment: .bottom) {
                 Rectangle().fill(Color(hex: "D5D8DC")).frame(height: 0.5)
-                    .padding(.trailing, 60)
                     .offset(y: 8)
             }
         }

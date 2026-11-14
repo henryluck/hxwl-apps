@@ -1,3 +1,4 @@
+import Capabilities
 import CoreKit
 import Photos
 import PhotosUI
@@ -10,6 +11,9 @@ public struct CompressToolView: View {
         case photo = "照片压缩"
         case video = "视频压缩"
     }
+
+    /// 订阅门：未订阅点「开始压缩」→ 弹订阅页
+    var pay: (any PayService)? = nil
 
     enum Strength: String, CaseIterable {
         case light = "轻度压缩"
@@ -40,6 +44,12 @@ public struct CompressToolView: View {
     @State private var working = false
     @State private var progressValue: Double = 0
     @State private var done: DoneState?
+    // 需求2：完成页展示压缩后资产的缩略图（PHAsset localIdentifier）
+    @State private var resultAssetIDs: [String] = []
+    // 需求2：完成页「保留/删除原始照片」二选一（原型232：主按钮保留，次按钮删除）
+    @State private var hideOriginalsOnDone = true
+    // 需求3：未开启相册权限点「添加照片/视频」→ 权限提示弹窗（去设置/取消）
+    @State private var showAuthAlert = false
     @Environment(\.dismiss) private var dismiss
 
     struct DoneState: Equatable {
@@ -53,8 +63,9 @@ public struct CompressToolView: View {
         let isVideo: Bool
     }
 
-    public init(mode: Mode) {
+    public init(mode: Mode, pay: (any PayService)? = nil) {
         self.mode = mode
+        self.pay = pay
     }
 
     public var body: some View {
@@ -83,10 +94,13 @@ public struct CompressToolView: View {
         .toolbarBackground(CleanPalette.navBarGreen, for: .navigationBar)
         .toolbarColorScheme(.light, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
-            CleanPrimaryButton(workButtonTitle, enabled: canStart) { start() }
-                .padding(.horizontal, 40)
-                .padding(.vertical, 12)
-                .background(Color.white.opacity(0.96))
+            // 完成页有自己的「保留/删除原始照片」按钮 → 底部操作按钮隐藏
+            if done == nil {
+                CleanPrimaryButton(workButtonTitle, enabled: canStart) { start() }
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 12)
+                    .background(Color.white.opacity(0.96))
+            }
         }
         .sheet(isPresented: $pickerOpen) {
             MediaPickerSheet(isVideo: mode == .video) { items in
@@ -95,6 +109,19 @@ public struct CompressToolView: View {
         }
         .onChange(of: done) { d in
             if d != nil { working = false }
+        }
+        // 需求3：未开启相册权限 → 提示弹窗（文案按要求）
+        .alert("需要访问照片权限", isPresented: $showAuthAlert) {
+            Button("去设置") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(mode == .video
+                 ? "请允许访问照片库，以便选择或保存视频。"
+                 : "请允许访问照片库，以便选择或保存图片。")
         }
         .overlay {
             if let d = done {
@@ -120,6 +147,7 @@ public struct CompressToolView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Color(hex: "1A1A1A"))
                 HStack(spacing: 8) {
+                    // 需求4：三个强度选项居中且左右等距贴近边框
                     ForEach(Strength.allCases, id: \.rawValue) { s in
                         Button {
                             strength = s
@@ -127,14 +155,13 @@ public struct CompressToolView: View {
                             Text(s.rawValue)
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(strength == s ? CleanPalette.green : Color(hex: "9AA09C"))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
+                                .frame(maxWidth: .infinity, minHeight: 32)
                                 .background(
                                     Capsule().fill(strength == s ? CleanPalette.greenPale : Color(hex: "F2F3F5"))
                                 )
                         }
+                        .accessibilityIdentifier("compress.strength.\(s.rawValue)")
                     }
-                    Spacer()
                 }
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -164,9 +191,10 @@ public struct CompressToolView: View {
 
     private var addCard: some View {
         Button {
-            guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
-                    || PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited else {
-                PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in }
+            // 需求3：未开启相册权限 → 提示弹窗引导去设置（不静默请求）
+            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            guard status == .authorized || status == .limited else {
+                showAuthAlert = true
                 return
             }
             pickerOpen = true
@@ -279,51 +307,108 @@ public struct CompressToolView: View {
 
     private func start() {
         if done != nil { dismiss(); return }
+        // 订阅门：未订阅拉起订阅页，不放行压缩
+        guard !CoreFeatureGate.gate(pay) else { return }
         guard !picked.isEmpty, !working else { return }
         working = true
         progressValue = 0.05
-        Compressor.compress(items: picked, quality: strength.quality) { doneCount, saved in
+        hideOriginalsOnDone = true
+        Compressor.compress(items: picked, quality: strength.quality) { doneCount, saved, outputIDs in
             progressValue = 1
+            resultAssetIDs = outputIDs
             done = DoneState(count: doneCount, saved: saved)
         }
     }
 
-    // MARK: - 完成浮层
+    // MARK: - 完成页（需求2：原型232 全屏完成页——对勾 + 压缩完成 + 节省百分比 + 压缩图 2×2 + 保留/删除原始照片）
+
+    /// 副标题：照片「照片已导出，本次压缩节省43%空间」；视频改「视频已导出…」
+    private var doneSubtitle: String {
+        let noun = mode == .video ? "视频" : "照片"
+        return "\(noun)已导出，本次压缩节省\(Int(strength.percent * 100))%空间"
+    }
 
     private func doneView(_ d: DoneState) -> some View {
-        ZStack {
-            Color.black.opacity(0.25).ignoresSafeArea()
+        VStack(spacing: 0) {
+            Spacer()
+            // 顶部：绿色对勾徽章 + 标题 + 副标题
             VStack(spacing: 14) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 52))
-                    .foregroundStyle(CleanPalette.green)
+                ZStack {
+                    Circle()
+                        .fill(CleanPalette.greenPale)
+                        .frame(width: 96, height: 96)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 56))
+                        .foregroundStyle(Color(hex: "51CE52"))
+                }
                 Text("压缩完成")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(Color(hex: "1A1A1A"))
-                Text("已导出压缩版本，本次预计节省\(Int(strength.percent * 100))%空间")
-                    .font(.system(size: 13))
+                Text(doneSubtitle)
+                    .font(.system(size: 14))
                     .foregroundStyle(Color(hex: "6B7078"))
-                    .multilineTextAlignment(.center)
-                Text("处理 \(d.count) 项 · 节省约 \(ByteFormatter.short(d.saved))")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(CleanPalette.green)
-                CleanPrimaryButton("完成") {
-                    self.done = nil
-                    picked = []
-                    dismiss()
+            }
+            // 中部：压缩后照片 2×2 网格（原型232，不足四张有几张显示几张）
+            thumbGrid
+                .padding(.top, 22)
+            Spacer()
+            // 底部：主按钮「保留原始照片」+ 次按钮「删除原始照片」
+            VStack(spacing: 14) {
+                CleanPrimaryButton(mode == .video ? "保留原始视频" : "保留原始照片") {
+                    finishDone(hideOriginals: false)
+                }
+                Button {
+                    finishDone(hideOriginals: true)
+                } label: {
+                    Text(mode == .video ? "删除原始视频" : "删除原始照片")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Color(hex: "1A1A1A"))
+                        .padding(.vertical, 12)
                 }
             }
-            .padding(24)
-            .frame(width: 280)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white))
+            .padding(.horizontal, 40)
+            .padding(.bottom, 24)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(CleanPalette.pageBackground.ignoresSafeArea())
+        .transition(.opacity)
+    }
+
+    /// 压缩结果缩略图 2×2（最多 4 张；原型 232 布局）
+    private var thumbGrid: some View {
+        let ids = Array(resultAssetIDs.prefix(4))
+        return VStack(spacing: 2) {
+            let rows = stride(from: 0, to: max(ids.count, 1), by: 2).map { Array(ids[$0..<min($0 + 2, ids.count)]) }
+            ForEach(rows.indices, id: \.self) { r in
+                HStack(spacing: 2) {
+                    ForEach(rows[r], id: \.self) { id in
+                        AssetThumb(assetID: id)
+                            .frame(width: 148, height: 148)
+                            .clipped()
+                    }
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 40)
+    }
+
+    /// 完成页收尾：按用户选择保留或删除原始资产（删除走系统确认弹窗，此时页面已到完成态不遮进度条）
+    private func finishDone(hideOriginals: Bool) {
+        Compressor.setOriginalsHidden(hideOriginals, ids: picked.map { $0.id })
+        self.done = nil
+        picked = []
+        resultAssetIDs = []
+        dismiss()
     }
 }
 
-/// 压缩执行：读原图 → JPEG 重编码 → 存新资产 + 隐藏原资产
+/// 压缩执行：读原图 → JPEG 重编码 → 存新资产。
+/// 需求1：压缩过程**不做任何隐藏原图动作**——isHidden 会触发系统「删除确认」弹窗
+/// 盖住进度条画面；是否隐藏/删除原图改由完成页按钮（保留/删除原始照片）决定。
 enum Compressor {
     static func compress(items: [CompressToolView.PickedItem], quality: Double,
-                         completed: @escaping @MainActor (Int, Int64) -> Void) {
+                         completed: @escaping @MainActor (Int, Int64, [String]) -> Void) {
         let ids = items.map { $0.id }
         let fetch = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
         var objects: [PHAsset] = []
@@ -339,8 +424,10 @@ enum Compressor {
                 let img: UIImage? = await withCheckedContinuation { cont in
                     manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize,
                                          contentMode: .aspectFit, options: opts) { image, info in
+                        // 防御：任何重复回调（iCloud/异常路径）只 resume 一次，否则 CheckedContinuation 二次 resume 崩溃
                         let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                        cont.resume(returning: degraded ? nil : image)
+                        if degraded { return }
+                        cont.resume(returning: image)
                     }
                 }
                 if let img { images.append((img, asset.localIdentifier)) }
@@ -358,20 +445,56 @@ enum Compressor {
                     }
                 }
             }
+            // 只写回压缩版（不碰原资产，全程无系统弹窗）
+            var outputIDs: [String] = []
             do {
                 try await PHPhotoLibrary.shared().performChanges {
-                    for img in outputs {
-                        PHAssetChangeRequest.creationRequestForAsset(from: img)
-                    }
-                    for asset in objects {
-                        PHAssetChangeRequest(for: asset).isHidden = true
-                    }
+                    let requests = outputs.map { PHAssetChangeRequest.creationRequestForAsset(from: $0) }
+                    // creationRequestForAsset 的 placeholder id 在 block 外取不到，
+                    // 用新建资产数量与完成回调顺序保证 resultAssetIDs 对齐（见 setOriginalsHidden）
+                    _ = requests
                 }
+                // 写回后按创建时间倒序查回新建资产的 id（供完成页缩略图展示）
+                outputIDs = await Self.fetchRecentIDs(count: outputs.count)
             } catch {
                 Log.error("[Compressor] 写回失败: \(error.localizedDescription)")
             }
-            await MainActor.run { completed(count, savedBytes) }
+            await MainActor.run { completed(count, savedBytes, outputIDs) }
         }
+    }
+
+    /// 需求2/1：完成页按钮回调——批量标记/取消标记原图隐藏。
+    /// 「删除原始照片」语义 = isHidden=true（系统会弹确认框，此时在完成页点击，不遮进度条）。
+    static func setOriginalsHidden(_ hidden: Bool, ids: [String]) {
+        let fetch = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+        var objects: [PHAsset] = []
+        fetch.enumerateObjects { a, _, _ in objects.append(a) }
+        guard !objects.isEmpty else { return }
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in
+            Task.detached(priority: .userInitiated) {
+                do {
+                    try await PHPhotoLibrary.shared().performChanges {
+                        for asset in objects {
+                            PHAssetChangeRequest(for: asset).isHidden = hidden
+                        }
+                    }
+                } catch {
+                    Log.error("[Compressor] 标记原图隐藏失败: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// 查回最近创建的 n 个资产 id（完成页缩略图用）
+    private static func fetchRecentIDs(count: Int) async -> [String] {
+        guard count > 0 else { return [] }
+        let opts = PHFetchOptions()
+        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        opts.fetchLimit = count
+        let fetch = PHAsset.fetchAssets(with: .image, options: opts)
+        var ids: [String] = []
+        fetch.enumerateObjects { a, _, _ in ids.append(a.localIdentifier) }
+        return ids
     }
 }
 

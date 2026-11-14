@@ -22,7 +22,6 @@ public struct ProtoPaywallView: View {
     @State private var purchasing = false
     @State private var purchaseError: String?
     @State private var restoreMessage: String?
-    @State private var purchaseSuccess = false
     @State private var legalDoc: LegalKind?
 
     public init(config: PaywallConfig, theme: any ThemeService, pay: any PayService,
@@ -74,34 +73,39 @@ public struct ProtoPaywallView: View {
                     .ignoresSafeArea(edges: .bottom)
             }
 
-            // 内容列（标题/权益/套餐卡/按钮…），从插画下方开始
+            // 内容列（标题/权益/套餐卡/按钮…），对齐原型 #112（402x874 画布）：
+            //   标题 y410 / 副标题 y454 / 权益行 y490..619 / 套餐卡 y661.5..747.5 /
+            //   「下一步」y760..826 / 合规文字 y843..856（距屏底 18pt）。
+            // 文字块整体贴屏幕下方：顶部 Spacer 吸收全部剩余空间（minLength 286 保证
+            // 在插画之下），底部按原型留 18pt 边距。
+            // Bug表R2-3：页面文案固定不能上下滑动 → 一屏排布不滚动；
+            // 小屏兜底：FitContentScale 整体等比缩放（锚点底部，贴底不被裁）。
             VStack(spacing: 0) {
-                Spacer(minLength: 300)
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        Text("会员权益")
-                            .font(.system(size: 30, weight: .bold))
-                            .foregroundStyle(titleBlack)
-                        Text("释放更多空间，清理更高效")
-                            .font(.system(size: 15))
-                            .foregroundStyle(Color(hex: "8A9199"))
-                            .padding(.top, 8)
+                Spacer(minLength: 286)
+                VStack(spacing: 0) {
+                    Text("会员权益")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(titleBlack)
+                    Text("释放更多空间，清理更高效")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color(hex: "8A9199"))
+                        .padding(.top, 14)
 
-                        benefits
-                            .padding(.top, 22)
+                    benefits
+                        .padding(.top, 21)
 
-                        planCard
-                            .padding(.top, 26)
+                    planCard
+                        .padding(.top, 42)
 
-                        mainButton
-                            .padding(.top, 18)
+                    mainButton
+                        .padding(.top, 12)
 
-                        complianceText
-                            .padding(.top, 10)
-                    }
-                    .padding(.horizontal, 31)
-                    .padding(.bottom, 16)
+                    complianceText
+                        .padding(.top, 15)
                 }
+                .padding(.horizontal, 16)
+                .modifier(FitContentScale(maxHeight: 380))
+                .padding(.bottom, 18)
             }
         }
         .background(pageBackground.ignoresSafeArea())
@@ -121,11 +125,6 @@ public struct ProtoPaywallView: View {
         } message: {
             Text(restoreMessage ?? "")
         }
-        .alert("订阅成功", isPresented: $purchaseSuccess) {
-            Button("好") { closePaywall() }
-        } message: {
-            Text("已解锁全部高级功能，感谢支持")
-        }
         .sheet(item: $legalDoc) { kind in
             LegalDocSheet(kind: kind,
                           url: kind == .privacy ? config.privacyURL : config.termsURL,
@@ -142,7 +141,8 @@ public struct ProtoPaywallView: View {
     private var hero: some View {
         AssetMedia(path: "assets/proto/paywall_hero.jpg", contentMode: .fill)
             .frame(maxWidth: .infinity)
-            .frame(height: 340)
+            // Bug表R2-4：标题和上图紧凑 → 绿色背景（插画区）向上拉长一点（340→372）
+            .frame(height: 372)
             .clipped()
             .overlay(alignment: .bottom) {
                 // 波浪白弧过渡（原型 F7FFFA 曲线）
@@ -202,22 +202,16 @@ public struct ProtoPaywallView: View {
             )
 
             if isFirstPurchase {
-                // 「新人特惠」红标签：骑在卡片右上角。
-                // tag_newbie.png 只有原型导出的红色渐变胶囊——原型里白字被转成了 path，
-                // 切图时没跟着导出，所以这里用 SwiftUI 把白字叠回红底上（任意缩放都清晰）。
-                // 红底在 200x200 素材里占 x11..188 / y59..140，正好居中，Text 居中即可对齐。
-                ZStack {
-                    AssetMedia(path: "assets/proto/tag_newbie.png", contentMode: .fit)
-                    Text("新人特惠")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white)
-                        .tracking(0.4)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                .frame(width: 76, height: 76)
-                .offset(x: 10, y: -26)
-                .accessibilityHidden(true)
+                // 「新人特惠」缎带标签（Bug表R2-1：原实现图片素材燕尾朝向反了）。
+                // 原型精确样式（像素级测量 402 宽基准）：
+                //   主体 66x28 圆角矩形，贴卡片右上角（右边缘与卡片右边框平齐）；
+                //   右下角沿卡片右边框有一个向下的小燕尾尖（约 4pt）；
+                //   底色从左到右：正红 rgb(232,33,11) → 橙 rgb(245,129,78)；
+                //   白字 12pt 水平居中。
+                NewbieRibbonLabel()
+                    .frame(width: 68, height: 28)
+                    .offset(y: -6)   // 骑跨卡片顶边框：主体上半在卡外、下半压边框
+                    .accessibilityHidden(true)
             }
         }
         .padding(.top, 10)
@@ -232,7 +226,11 @@ public struct ProtoPaywallView: View {
             Task {
                 do {
                     try await pay.purchase()
-                    if pay.isPro { purchaseSuccess = true }
+                    if pay.isPro {
+                        // 购买成功 → 壳层统一展示「完成订阅页」（不再是「订阅成功」弹窗）
+                        ProtoSubscriptionFlow.notifySuccess()
+                        closePaywall()
+                    }
                 } catch {
                     purchaseError = error.payUserMessage
                 }
@@ -246,8 +244,29 @@ public struct ProtoPaywallView: View {
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .frame(height: 66)
-            .background(accent)
+            .background(
+                // Bug表R2-2：主按钮加光效（顶部高光 + 呼吸渐变）
+                ZStack(alignment: .top) {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(accent)
+                    // 顶部横向高光带（只圆上部两角：用 UnevenRoundedRectangle，iOS16+）
+                    Rectangle()
+                        .fill(
+                            LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.02)],
+                                           startPoint: .top, endPoint: .bottom)
+                        )
+                        .frame(height: 28)
+                        .clipShape(HeaderHighlightShape(radius: 16))
+                }
+            )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                // 内描边高光：玻璃质感
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(LinearGradient(colors: [.white.opacity(0.45), .white.opacity(0.05)],
+                                           startPoint: .top, endPoint: .bottom), lineWidth: 1)
+            )
+            .modifier(ButtonPulseEffect())
         }
         .disabled(purchasing)
     }
@@ -338,6 +357,154 @@ struct WaveEdge: Shape {
         p.addLine(to: CGPoint(x: 0, y: rect.height))
         p.closeSubpath()
         return p
+    }
+}
+
+// MARK: - 「新人特惠」缎带（Bug表R2-1）
+//
+// 原型像素测量（402 宽画布）：主体 66x28 圆角矩形贴套餐卡右上角，
+// 右下角沿卡片右边框有向下 4pt 的小燕尾；左→右渐变 正红(232,33,11)→橙(245,129,78)。
+// 纯 SwiftUI 绘制，任意分辨率清晰；文字由调用方 overlay 居中叠加。
+struct NewbieRibbon: Shape {
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        let r: CGFloat = 9            // 主体圆角
+        let tail: CGFloat = 4.5       // 右下燕尾下垂高度
+        var p = Path()
+        // 从左上角开始顺时针
+        p.move(to: CGPoint(x: 0, y: r))
+        p.addQuadCurve(to: CGPoint(x: r, y: 0), control: CGPoint(x: 0, y: 0))
+        p.addLine(to: CGPoint(x: w - r, y: 0))
+        p.addQuadCurve(to: CGPoint(x: w, y: r), control: CGPoint(x: w, y: 0))
+        // 右边框直落到底，收一个小燕尾尖（沿右边缘向内收）
+        p.addLine(to: CGPoint(x: w, y: h))
+        p.addLine(to: CGPoint(x: w - tail * 1.6, y: h + tail))
+        p.addLine(to: CGPoint(x: w - tail * 2.2, y: h))
+        // 底边向左，左下圆角
+        p.addLine(to: CGPoint(x: r, y: h))
+        p.addQuadCurve(to: CGPoint(x: 0, y: h - r), control: CGPoint(x: 0, y: h))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// 顶部高光带形状：上部两角圆、下部直角（兼容 iOS16，手写 Path）
+struct HeaderHighlightShape: Shape {
+    let radius: CGFloat
+    func path(in rect: CGRect) -> Path {
+        let r = min(radius, rect.width / 2, rect.height)
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: rect.height))
+        p.addLine(to: CGPoint(x: 0, y: r))
+        p.addQuadCurve(to: CGPoint(x: r, y: 0), control: CGPoint(x: 0, y: 0))
+        p.addLine(to: CGPoint(x: rect.width - r, y: 0))
+        p.addQuadCurve(to: CGPoint(x: rect.width, y: r), control: CGPoint(x: rect.width, y: 0))
+        p.addLine(to: CGPoint(x: rect.width, y: rect.height))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// 「新人特惠」成品标签（缎带 + 渐变 + 白字）
+struct NewbieRibbonLabel: View {
+    var body: some View {
+        NewbieRibbon()
+            .fill(
+                LinearGradient(colors: [Color(red: 232/255, green: 33/255, blue: 11/255),
+                                        Color(red: 245/255, green: 129/255, blue: 78/255)],
+                               startPoint: .leading, endPoint: .trailing)
+            )
+            .overlay(
+                Text("新人特惠")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
+                    .tracking(0.5)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.horizontal, 5)
+            )
+    }
+}
+
+// MARK: - 按钮动效（Bug表R2-2：缩放 + 光效）
+
+/// 主按钮呼吸光效：高光扫过 + 缩放脉动（用户要求：放大缩小更明显、扫光更亮更快）。
+struct ButtonPulseEffect: ViewModifier {
+    @State private var phase: Bool = false
+
+    func body(content: Content) -> some View {
+        content
+            // 缩放幅度 1.015 → 1.03：脉动感更明显
+            .scaleEffect(phase ? 1.03 : 1.0)
+            .overlay(
+                // 斜向高光带扫过（亮度 0.28 → 0.5，速度 2.4s → 1.2s）
+                GeometryReader { geo in
+                    LinearGradient(colors: [.clear, .white.opacity(phase ? 0.5 : 0.0), .clear],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .frame(width: geo.size.width * 0.6)
+                        .offset(x: phase ? geo.size.width * 0.7 : -geo.size.width * 0.7)
+                        .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: false),
+                                   value: phase)
+                }
+                .allowsHitTesting(false)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            )
+            .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: phase)
+            .onAppear { phase = true }
+    }
+}
+
+/// 内容固定一屏：小屏高度不足时整体等比缩小（不滚动、不裁切）。
+struct FitContentScale: ViewModifier {
+    let maxHeight: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(FitContentScaleInner(maxHeight: maxHeight))
+    }
+}
+
+/// 限时特惠「立即体验」按钮动效：圆角 r16*k 区域内缩放脉动 + 斜向扫光。
+/// position 布局里不能改 frame，扫光用固定 overlay 区域按 k 缩放。
+struct FlashBuyPulse: ViewModifier {
+    let k: CGFloat
+    @State private var phase = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(
+                GeometryReader { geo in
+                    LinearGradient(colors: [.clear, .white.opacity(phase ? 0.42 : 0.0), .clear],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .frame(width: geo.size.width * 0.5)
+                        .offset(x: phase ? geo.size.width : -geo.size.width)
+                        .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: false),
+                                   value: phase)
+                }
+                .allowsHitTesting(false)
+                .clipShape(RoundedRectangle(cornerRadius: 16 * k, style: .continuous))
+                .padding(.horizontal, 2)
+            )
+            .scaleEffect(phase ? 1.028 : 1.0)
+            .animation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true), value: phase)
+            .onAppear { phase = true }
+    }
+}
+
+struct FitContentScaleInner: ViewModifier {
+    let maxHeight: CGFloat
+    @State private var naturalHeight: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                GeometryReader { geo in
+                    Color.clear.onAppear { naturalHeight = geo.size.height }
+                        .onChange(of: geo.size.height) { naturalHeight = $0 }
+                }
+            )
+            // 锚点底部：订阅页文字块贴屏幕下方，小屏等比缩放时保持贴底不悬浮
+            .scaleEffect(naturalHeight > maxHeight ? maxHeight / naturalHeight : 1, anchor: .bottom)
     }
 }
 
@@ -464,7 +631,8 @@ public struct ProtoFlashSaleView: View {
                     .position(x: 201 * k, y: 348 * k)
                     .accessibilityIdentifier("flashSale.legal")
 
-                    // 「立即体验」点击热区（原型按钮 x=31..372 / 画布 y=262..332）
+                    // 「立即体验」点击热区（原型按钮 x=31..372 / 画布 y=262..332）。
+                    // Bug表R2-2：按钮加缩放脉动（光效已由烧录位图承载，只叠加缩放+扫光）
                     Button { purchase() } label: {
                         ZStack {
                             Color.clear
@@ -475,6 +643,7 @@ public struct ProtoFlashSaleView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(purchasing)
+                    .modifier(FlashBuyPulse(k: k))
                     .position(x: 201.5 * k, y: 297 * k)
                     .accessibilityIdentifier("flashSale.buy")
 
@@ -570,6 +739,8 @@ public struct ProtoFlashSaleView: View {
             if pay.isPro {
                 hasPurchasedRetention = true
                 onClose()
+                // 挽留页购买成功同样进入「完成订阅页」（与主订阅墙一致）
+                ProtoSubscriptionFlow.notifySuccess()
             }
         }
     }

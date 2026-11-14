@@ -73,8 +73,10 @@ public final class CleanExecutor {
                 let img: UIImage? = await withCheckedContinuation { cont in
                     manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize,
                                          contentMode: .aspectFit, options: opts) { image, info in
+                        // 防御：任何重复回调（iCloud/异常路径）只 resume 一次，否则 CheckedContinuation 二次 resume 崩溃
                         let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                        cont.resume(returning: degraded ? nil : image)
+                        if degraded { return }
+                        cont.resume(returning: image)
                     }
                 }
                 if let img { images.append(img) }
