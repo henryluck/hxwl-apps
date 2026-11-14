@@ -1,6 +1,7 @@
 import BaseComponents
 import Capabilities
 import CoreKit
+import Network
 import SwiftUI
 
 // 集成适配包：按选配条件导入。没被 project.yml 引用的包 canImport 返回 false，
@@ -148,15 +149,86 @@ struct FactoryApp: App {
             zhongtai: zhongtai
         )
 
-        // 中台：启动后台登录 → 归因 → $AppStart 事件（隐私协议随首次启动同意；失败静默）
+        // 中台启动链路（文档 361-617）：
+        // ① 登录（失败→网络恢复时重试）② 数盟 ID 上报（登录后，无数盟 SDK 静默跳过）
+        // ③ 归因（activityChannel 写请求头）④ $AppStart（实时，必报）
+        // ⑤ 心跳埋点（首次 5 分钟后，之后每 25 分钟；后台暂停计时）
+        // 全部失败静默（文档允许：S2S 上报不阻断业务）。
         if let z = zhongtaiClient {
-            Task {
-                do {
-                    try await z.login()
-                    try? await z.reportAttribution()
-                    try? await z.reportEvent(name: "$AppStart", params: ["$os": "iOS"])
-                } catch {
-                    Log.error("[Zhongtai] 启动流程失败: \(error.localizedDescription)")
+            bootstrapZhongtai(z)
+            startHeartbeat(z)
+        }
+    }
+
+    /// 启动链路：login → 数盟 → 归因 → $AppStart。login 失败挂网络恢复重试。
+    private func bootstrapZhongtai(_ z: ZhongtaiClient) {
+        Task {
+            do {
+                try await z.login()
+            } catch {
+                Log.error("[Zhongtai] 启动登录失败（待网络恢复重试）: \(error.localizedDescription)")
+                await Self.retryLoginWhenReachable(z)
+                return   // 网络恢复路径成功后会继续补归因/埋点
+            }
+            await Self.postLoginFlow(z)
+        }
+    }
+
+    /// 登录成功后的固定序列：数盟 → 归因 → $AppStart（可重入；网络恢复重试也走这里）。
+    private static func postLoginFlow(_ z: ZhongtaiClient) async {
+        try? await z.reportDigitalUnion()
+        try? await z.reportAttribution()
+        try? await z.reportEvent(name: "$AppStart",
+                                 params: ["$resume_from_background": false])
+    }
+
+    /// 文档 8.2：登录失败，网络变为可用时重新调用（NWPathMonitor 监听，一次性）。
+    private static func retryLoginWhenReachable(_ z: ZhongtaiClient) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            final class OnceBox: @unchecked Sendable {
+                var done = false
+                let lock = NSLock()
+                func claim() -> Bool { lock.lock(); defer { lock.unlock() }
+                    if done { return false }; done = true; return true }
+            }
+            let once = OnceBox()
+            let monitor = NWPathMonitor()
+            monitor.pathUpdateHandler = { path in
+                guard path.status == .satisfied, once.claim() else { return }
+                monitor.cancel()
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)   // 网络刚恢复缓 1.5s
+                    if (try? await z.healthCheck()) == true {
+                        await postLoginFlow(z)
+                    }
+                    cont.resume()
+                }
+            }
+            monitor.start(queue: DispatchQueue(label: "zhongtai.netwatch"))
+        }
+    }
+
+    /// 心跳埋点载体：钉住 monitor 生命周期（handler 闭包持有，方法级属性即可）。
+    private var netMonitor: NWPathMonitor?
+
+    /// 文档 8.6.2：sdk_heartbeat —— 启动 5 分钟后第一次，之后每 25 分钟一次；
+    /// 进后台暂停计时，回前台继续。
+    private func startHeartbeat(_ z: ZhongtaiClient) {
+        Task {
+            var elapsed: TimeInterval = 0
+            let tick: TimeInterval = 30          // 粒度 30s，后台不累计
+            let first: TimeInterval = 5 * 60
+            let interval: TimeInterval = 25 * 60
+            var firedOnce = false
+            while true {
+                try? await Task.sleep(nanoseconds: UInt64(tick * 1_000_000_000))
+                guard await UIApplication.shared.applicationState != .background else { continue }
+                elapsed += tick
+                let target = firedOnce ? interval : first
+                if elapsed >= target {
+                    elapsed = 0
+                    firedOnce = true
+                    try? await z.reportEvent(name: "sdk_heartbeat", params: [:])
                 }
             }
         }

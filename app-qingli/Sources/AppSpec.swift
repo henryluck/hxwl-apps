@@ -149,8 +149,9 @@ struct AppSpec: Decodable {
     /// 能力缺省 = 不打包该能力（Null 兜底）；provider 是自由字符串，装配侧用
     /// `#if canImport(<能力><厂家>)` 路由到对应实现。
     struct Integrations: Decodable {
-        /// 中台代理配置（走 ios-server AES 代理）。
+        /// 中台网关代理配置（走 ios-server AES 代理，spec.integrations.edge 段）。
         /// baseURL=代理地址；aesKey/aesIv 各 16 字节；channel=渠道号（默认 61）。
+        /// prdId 是**唯一权威来源**：服务端只透传、不覆盖，缺失时服务端本地拦截 9004。
         struct Zhongtai: Decodable {
             let prdId: String
             let baseURL: String
@@ -168,7 +169,7 @@ struct AppSpec: Decodable {
                 baseURL = try c.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
                 let key = try c.decodeIfPresent(String.self, forKey: .aesKey) ?? ""
                 aesKey = key
-                // 默认 IV = Key（与 ios-demo / ios-server 当前配置一致：二者相同）
+                // 默认 IV = Key（历史约定；本包 spec.json 显式配置了独立 IV）
                 aesIv = try c.decodeIfPresent(String.self, forKey: .aesIv) ?? key
                 channel = try c.decodeIfPresent(Int.self, forKey: .channel) ?? 61
             }
@@ -179,7 +180,7 @@ struct AppSpec: Decodable {
             let config: [String: String]?   // 该厂家所需参数（serverURL/token/appKey...）
         }
         let zhongtai: Zhongtai?
-        let analytics: ProviderConfig?      // 埩点
+        let analytics: ProviderConfig?      // 埋点
         let push: ProviderConfig?           // 推送
         let crash: ProviderConfig?          // 崩溃上报
 
@@ -189,13 +190,18 @@ struct AppSpec: Decodable {
         private struct BuglyLegacy: Decodable { let appId: String; let appKey: String }
 
         private enum CodingKeys: String, CodingKey {
-            case zhongtai, analytics, push, crash
+            case zhongtai, edge, analytics, push, crash
             case sensors, jpush, bugly      // 老格式字段
         }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            zhongtai = try c.decodeIfPresent(Zhongtai.self, forKey: .zhongtai)
+            // 新键 edge（与 spec.json 命名一致）；zhongtai 保留兼容旧装配
+            if let v = try? c.decodeIfPresent(Zhongtai.self, forKey: .edge) {
+                zhongtai = v
+            } else {
+                zhongtai = try? c.decodeIfPresent(Zhongtai.self, forKey: .zhongtai)
+            }
 
             // 新格式优先；缺失时回退到老格式按厂商字段，归一化成 ProviderConfig
             if let v = try c.decodeIfPresent(ProviderConfig.self, forKey: .analytics) {

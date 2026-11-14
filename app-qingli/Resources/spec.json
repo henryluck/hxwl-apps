@@ -40,13 +40,15 @@
     "continue_label": "下一步"
   },
   "integrations": {
-    "zhongtai": {
-      "env": "prod",
-      "aesIv": "",
+    "edge": {
       "prdId": "4115205",
-      "aesKey": "",
-      "baseURL": "https://open-api.yingzhongshare.com",
-      "channel": 61
+      "baseURL": "https://znwxdh.gzhuanxiwl.com",
+      "env": "prod",
+      "aesKey": "vrhqaCepM8fODO9J",
+      "aesIv": "3zU6IsPR1Z2g2cpO",
+      "channel": 61,
+      "verified": true,
+      "tested_at": "2026-11-14"
     },
     "analytics": {
       "provider": "__none__",
