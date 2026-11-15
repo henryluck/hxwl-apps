@@ -6,6 +6,7 @@ import Photos
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import Vision
 
 // MARK: - 百宝箱三个独立图片工具（原型 #137/#140/#144、#146/#149/#152、#9/#101/#103）
@@ -13,7 +14,7 @@ import Vision
 // 全部为真实功能，不再落到「照片压缩」：
 //   · 照片修复：Core Image 自动校正 + 降噪 + 锐化 + 色彩增强，输出新照片并存入相册；
 //   · 照片抠图：Vision 主体/人像分割生成 alpha 蒙版，输出透明底 PNG 存入相册；
-//   · Live Photo 转静态：读相册真实 Live Photo，导出静态帧为新照片并隐藏原片。
+//   · Live Photo 转静态：读相册真实 Live Photo，导出静态帧为新照片并删除原片。
 // 每个页面都提供「试试示例照片」，无需相册权限也能现场验证算法确实在跑。
 
 // MARK: - 共用资源 / 组件
@@ -61,6 +62,10 @@ public struct ToolNavBar<Trailing: View>: View {
 }
 
 /// 单图选择器（PHPicker，无需相册读权限）
+/// Bug修复：`loadObject(ofClass: UIImage.self)` 拿到的是 PHPicker 降采样的小图
+/// （约 1000~2000px），修复完输出跟着变小。改走 assetIdentifier → PHAsset →
+/// PHImageManager 原尺寸（PHImageManagerMaximumSize）读图，保证分辨率不缩水。
+/// （PHPicker 无 assetIdentifier 的场景——仅访问受限照片库——回退 loadObject。）
 struct SingleImagePicker: UIViewControllerRepresentable {
     let onImage: (UIImage) -> Void
 
@@ -83,12 +88,54 @@ struct SingleImagePicker: UIViewControllerRepresentable {
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             picker.dismiss(animated: true)
-            guard let provider = results.first?.itemProvider,
-                  provider.canLoadObject(ofClass: UIImage.self) else { return }
-            provider.loadObject(ofClass: UIImage.self) { object, _ in
-                guard let image = object as? UIImage else { return }
+            guard let result = results.first else { return }
+            // 首选：requestImageDataAndOrientation 读原始文件数据（保住原始分辨率）。
+            // Bug教训：requestImage + PHImageManagerMaximumSize + .aspectFit 在 iOS 26
+            // 会返回屏幕点数大小的图（393x853），修复输出只剩原图 1/6 分辨率。
+            if let assetID = result.assetIdentifier {
+                let fetch = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
+                if let asset = fetch.firstObject {
+                    let opts = PHImageRequestOptions()
+                    opts.isNetworkAccessAllowed = true
+                    opts.version = .current
+                    opts.deliveryMode = .highQualityFormat
+                    opts.isSynchronous = false
+                    PHImageManager.default().requestImageDataAndOrientation(
+                        for: asset, options: opts) { data, _, orientation, _ in
+                        guard let data, let image = UIImage(data: data) else {
+                            // 数据解码失败 → 回退 PHAsset 尺寸路径
+                            return
+                        }
+                        // requestImageDataAndOrientation 已按 EXIF 返回「方向已应用」的原始数据，
+                        // UIImage(data:) 解码即为正确方向
+                        DispatchQueue.main.async { self.onImage(image) }
+                    }
+                    return
+                }
+            }
+            // 回退：无相册标识（受限选择）→ itemProvider 原数据解码，保住原始分辨率
+            let provider = result.itemProvider
+            guard provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else { return }
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                guard let data, let image = UIImage(data: data) else { return }
                 DispatchQueue.main.async { self.onImage(image) }
             }
+        }
+    }
+}
+
+extension CGImagePropertyOrientation {
+    var imageOrientation: UIImage.Orientation {
+        switch self {
+        case .up: return .up
+        case .down: return .down
+        case .left: return .left
+        case .right: return .right
+        case .upMirrored: return .upMirrored
+        case .downMirrored: return .downMirrored
+        case .leftMirrored: return .leftMirrored
+        case .rightMirrored: return .rightMirrored
+        @unknown default: return .up
         }
     }
 }
@@ -985,7 +1032,7 @@ public struct LivePhotoToStillView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 20)
                     }
-                    Text("已选 \(selected.count) 张 · 转换后将保留静态照片，原 Live 动态部分隐藏")
+                    Text("已选 \(selected.count) 张 · 转换后将保留静态照片，原 Live Photo 会删除")
                         .font(.system(size: 11))
                         .foregroundStyle(Color(hex: "8A9A90"))
                         .padding(.bottom, 8)
@@ -1119,7 +1166,7 @@ public struct LivePhotoToStillView: View {
         CleanExecutor.shared.convertLiveToStatic(assets: cleanAssets) { result in
             working = false
             resultText = result.movedCount > 0
-                ? "已导出 \(result.movedCount) 张静态照片到相册，原 Live Photo 已隐藏（隐藏可在相册「已隐藏」中恢复）。"
+                ? "已导出 \(result.movedCount) 张静态照片到相册，原 Live Photo 已删除（可在相册「最近删除」中恢复）。"
                 : "转换失败，请检查相册写入权限后重试。"
         }
     }

@@ -131,8 +131,10 @@ public final class NavAppModel: ObservableObject {
 
     public var isUnlocked: Bool {
         #if DEBUG
-        // 联调开关：SIMCTL_CHILD_NAV_DEBUG_UNLOCK=1 时视作已解锁，便于截图验证
+        // 联调开关：SIMCTL_CHILD_NAV_DEBUG_UNLOCK=1 时视作已解锁，便于截图验证。
+        // UserDefaults(debug.navUnlock=1) 等效兜底——沙盒 shell 下 env 注入不稳定。
         if ProcessInfo.processInfo.environment["NAV_DEBUG_UNLOCK"] == "1" { return true }
+        if UserDefaults.standard.bool(forKey: "debug.navUnlock") { return true }
         #endif
         return pay.isPro
     }
@@ -182,6 +184,41 @@ public final class NavAppModel: ObservableObject {
                                                  latitudinalMeters: 2500,
                                                  longitudinalMeters: 2500))
         }
+    }
+
+    /// 失败页「重试定位」统一入口：真实重定位，成功后按当前流程自动续作
+    /// （周边 → 重载列表；规划 → 重规划；导航 ready → 重启导航）。
+    /// 返回nil 表示定位成功已续作；返回 failure 时由调用方展示。
+    @discardableResult
+    public func retryLocationAndReload() async -> NavFailure? {
+        // 权限未决时先等授权结果（与 plan() 同一链路，弹窗期间不误判失败）
+        if location.authState == .notDetermined {
+            let granted = await location.waitForAuthorization()
+            guard granted else { return .locationDenied }
+        }
+        guard let fix = await location.requestSingleFix(), fix.isUsable else {
+            return location.authState.isUsable ? .locationUnavailable : .locationDenied
+        }
+        // 定位成功：地图落到新位置
+        mapController.fit(MKCoordinateRegion(center: fix.place.gcj02Coordinate,
+                                             latitudinalMeters: 2500,
+                                             longitudinalMeters: 2500))
+        // 按当前流程续作
+        switch flow {
+        case .nearby:
+            nearbyFailure = nil
+            await loadNearbyPage(reset: true)
+        case .plan:
+            if engine.phase == .ready {
+                // 已有路线仅起点定位失败：直接重启导航
+                if let failure = await startNavigation() { return failure }
+            } else {
+                await plan()
+            }
+        default:
+            break
+        }
+        return nil
     }
 
     // MARK: - 搜索
@@ -301,19 +338,19 @@ public final class NavAppModel: ObservableObject {
 
     public func plan() async {
         guard let destination else { return }
-        // 起点优先用户手选；否则用当前有效位置（无缓存时取一次真实定位，不拿 0,0 算路）
-        var originPlace = originDisplay
-        // 【Bug 行15】规划时若定位权限仍未决定，先触发系统授权弹窗——
-        // 未授权时 requestSingleFix 恒 nil → engine.fail(locationUnavailable)，
-        // 用户看到「无法获取位置」且无法拉起导航。权限修复链路（宿主 ATT→通知→定位）
-        // 已覆盖大多数场景，这里是功能兜底：任何入口进规划都保证权限被请求过。
+        // 起点优先用户手选；否则用当前有效位置（无新鲜缓存时取一次真实定位，不拿 0,0 算路）
+        var originPlace = origin
+        // 【Bug 行15】规划时若定位权限仍未决定，先请求并等待授权结果（不再固定 sleep
+        // 400ms——那是在和用户点击速度赛跑）。未授权时 requestSingleFix 恒 nil →
+        // engine.fail(locationUnavailable)，用户看到「无法获取位置」且无法拉起导航。
         if location.authState == .notDetermined {
-            location.requestAuthorization()
-            // 授权弹窗出现后稍等授权回调刷新状态，再尝试定位
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            location.refreshAuthState()
+            let granted = await location.waitForAuthorization()
+            guard granted else {
+                engine.fail(.locationDenied)
+                return
+            }
         }
-        if originPlace == nil, let fix = await location.requestSingleFix() {
+        if originPlace == nil, let fix = await location.requestSingleFix(), fix.isUsable {
             originPlace = fix.place
         }
         guard let originPlace, originPlace.hasValidCoordinate else {
@@ -446,8 +483,17 @@ public final class NavAppModel: ObservableObject {
         let result = await search.searchNearby(category: category, center: center, page: nearbyPage)
         nearbyLoading = false
         if let failure = result.failure, result.places.isEmpty {
-            nearbyFailure = failure
-            return
+            // 【钓点空列表】周边搜索的「附近没有」也常伴随 serviceError（Apple 地图
+            // 对无结果请求抛错）；这类应展示空态（可换类别）而非失败页。
+            // 只有硬错误（断网/未授权定位）才进失败分流。
+            switch failure {
+            case .offline, .locationUnavailable, .locationDenied,
+                 .locationServicesOff, .authRequired:
+                nearbyFailure = failure
+                return
+            default:
+                break
+            }
         }
         nearbyFailure = nil
         if reset {
@@ -481,14 +527,21 @@ public final class NavAppModel: ObservableObject {
 
     #if DEBUG
     /// 本地联调落点：SIMCTL_CHILD_NAV_DEBUG_SCREEN=search|nearby|plan|compass|altitude|weather
+    /// nearby 可配 NAV_DEBUG_NEARBY_CATEGORY=<charger|fishingSpot|tackleShop|hospital|gym|park>
+    /// 指定分类（默认 charger；验证分类条自动滚动用超出屏幕的 gym/park）
+    /// UserDefaults(debug.navScreen=xxx) 为等效兜底（env 注入不稳定的自动化场景）
     /// 仅 DEBUG 编译，正式包不包含该分支
     public func applyDebugLaunchScreenIfNeeded() {
-        guard let screen = ProcessInfo.processInfo.environment["NAV_DEBUG_SCREEN"] else { return }
+        let screen = ProcessInfo.processInfo.environment["NAV_DEBUG_SCREEN"]
+            ?? UserDefaults.standard.string(forKey: "debug.navScreen")
+        guard let screen else { return }
         switch screen {
         case "search":
             openSearch(target: .destination)
         case "nearby":
-            openNearby(.charger)
+            let category = ProcessInfo.processInfo.environment["NAV_DEBUG_NEARBY_CATEGORY"]
+                .flatMap(NearbyCategory.init(rawValue:)) ?? .charger
+            openNearby(category)
         case "plan":
             destination = Place(id: "debug", name: "广州塔", address: "海珠区阅江西路222号",
                                 city: "广州市", district: "海珠区",

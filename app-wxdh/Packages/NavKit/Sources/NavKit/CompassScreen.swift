@@ -8,21 +8,43 @@ import SwiftUI
 /// 提示文案 → 「方位设置与校准」按钮（弹校准面板）。
 struct CompassScreen: View {
     @ObservedObject var model: NavAppModel
+    /// 【修复·表盘不转】heading 挂在 LocationService（嵌套 ObservableObject）上，
+    /// SwiftUI 不传播嵌套对象的 objectWillChange——只监听 model 时 heading 变化
+    /// 到不了视图，表盘/读数永远静止。单独监听 location 服务。
+    @ObservedObject private var location: LocationService
     @State private var style: Style = .classic
     @State private var showCalibration = false
     @State private var showHelp = false
+
+    init(model: NavAppModel) {
+        self.model = model
+        self.location = model.location
+        #if DEBUG
+        // 联调/截图：COMPASS_DEBUG_HELP=1 直接展开使用说明弹窗
+        if ProcessInfo.processInfo.environment["COMPASS_DEBUG_HELP"] == "1" {
+            _showHelp = State(initialValue: true)
+        }
+        // 联调/截图：COMPASS_DEBUG_STYLE=fun 直达趣味主题分段
+        // （沙盒 shell 下 env 注入不稳定时可用 UserDefaults(debug.compassStyle=fun) 等效）
+        let styleRaw = ProcessInfo.processInfo.environment["COMPASS_DEBUG_STYLE"]
+            ?? UserDefaults.standard.string(forKey: "debug.compassStyle")
+        if let styleRaw, let s = Style(rawValue: styleRaw) {
+            _style = State(initialValue: s)
+        }
+        #endif
+    }
 
     enum Style: String, CaseIterable {
         case classic, fun
         var title: String { self == .classic ? "传统罗盘" : "趣味主题" }
     }
 
-    private var heading: Double? { model.location.heading }
-    private var snapshot: LocationSnapshot? { model.location.snapshot }
+    private var heading: Double? { location.heading }
+    private var snapshot: LocationSnapshot? { location.snapshot }
 
     /// heading 有效性：nil 或精度 <0 一律视为待校准（原型 valid:!y）
     private var headingValid: Bool {
-        model.location.magneticHeading != nil || heading != nil
+        location.magneticHeading != nil || heading != nil
     }
 
     var body: some View {
@@ -31,10 +53,25 @@ struct CompassScreen: View {
             Color(hex: "F4F8F0").ignoresSafeArea()
 
             if !model.isUnlocked {
-                lockedState
+                // 锁定态同样保留页头 + 视角切换 + 底部说明（原型 daily-compass 完整结构）
+                VStack(spacing: 0) {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            titleBar
+                            stylePicker
+                                .padding(.top, 6)
+                            lockedState
+                            helpButton
+                                .padding(.top, 14)
+                                .padding(.bottom, 18)
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                }
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
+                        titleBar
                         stylePicker
                             .padding(.top, 6)
                         if style == .classic {
@@ -53,19 +90,109 @@ struct CompassScreen: View {
         .onAppear {
             // 罗盘 heading 依赖 WhenInUse 权限：notDetermined 时先触发系统弹窗，
             // 否则 startUpdatingHeading 永远不回调（"原地转圈方向不动"的根因之一）
-            if model.location.authState == .notDetermined {
-                model.location.requestAuthorization()
+            if location.authState == .notDetermined {
+                location.requestAuthorization()
             }
-            model.location.startHeading()
+            location.startHeading()
         }
-        .onDisappear { model.location.stopHeading() }
+        .onDisappear { location.stopHeading() }
         // 未解锁时连续停留 10 秒自动提醒（关闭订阅页后重新计时）
         .autoPaywallReminder(active: !model.isUnlocked)
         .sheet(isPresented: $showCalibration) { calibrationSheet }
-        .alert("使用说明", isPresented: $showHelp) {
-            Button("知道了", role: .cancel) {}
-        } message: {
-            Text("传统罗盘用于辨认手机朝向，手持时远离金属或磁性物品。\n民俗文化内容仅供娱乐，无科学预测依据，不作为出行决策依据。")
+        // 使用说明：原型 help-dialog 自定义弹窗（白底圆角卡 + 左上标题/右上关闭叉 +
+        // 三段正文 + 绿色「知道了」大按钮），非系统 alert
+        .overlay { helpDialogOverlay }
+    }
+
+    // MARK: - 页头标题栏（罗盘 + 我的/会员白胶囊，与导航/海拔/天气统一）
+
+    private var titleBar: some View {
+        HStack {
+            Text("罗盘")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Color(hex: "193E30"))
+            Spacer()
+            AccountMemberCapsule(model: model)
+        }
+        .padding(.top, 6)
+    }
+
+    // MARK: - 使用说明弹窗（help-dialog）
+
+    /// 遮罩 + 弹窗卡；点击遮罩也可关闭
+    @ViewBuilder
+    private var helpDialogOverlay: some View {
+        if showHelp {
+            ZStack {
+                Color.black.opacity(0.42)
+                    .ignoresSafeArea()
+                    .onTapGesture { withAnimation(.easeOut(duration: 0.18)) { showHelp = false } }
+
+                VStack(spacing: 0) {
+                    // 头部：左上「使用说明」+ 右上关闭叉
+                    HStack {
+                        Text("使用说明")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color(hex: "1E3A2E"))
+                        Spacer()
+                        Button {
+                            withAnimation(.easeOut(duration: 0.18)) { showHelp = false }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color(hex: "6B7E74"))
+                                .frame(width: 30, height: 30)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("关闭使用说明")
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+
+                    // 头部与正文分隔线
+                    Rectangle()
+                        .fill(Color(hex: "EEF2EC"))
+                        .frame(height: 1)
+
+                    // 正文三段（原型 help-body：首段大字深色，后两段小字灰色）
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("传统罗盘用于辨认手机朝向。趣味主题展示民俗日历中的方位，两者含义不同。")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(Color(hex: "22392E"))
+                            .lineSpacing(6)
+                        Text("民俗文化，仅供娱乐；无科学预测依据，不代表吉凶，不作为出行决策依据。")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color(hex: "7A877D"))
+                            .lineSpacing(4)
+                        Text("水平持握设备，远离金属或磁性物品。")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color(hex: "7A877D"))
+                            .lineSpacing(4)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
+
+                    // 「知道了」绿色大按钮
+                    Button {
+                        withAnimation(.easeOut(duration: 0.18)) { showHelp = false }
+                    } label: {
+                        Text("知道了")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color(hex: "1D6C4F"), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 18)
+                }
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .padding(.horizontal, 26)
+            }
+            .transition(.opacity)
         }
     }
 
@@ -199,8 +326,9 @@ struct CompassScreen: View {
                 .foregroundStyle(Color(hex: "688064"))
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // 主方位卡（fun-direction-feature：米黄底大字 + 山形曲线装饰）
-            ZStack(alignment: .bottomTrailing) {
+            // 主方位卡（fun-direction-feature：米黄底大字 + 右下山形曲线装饰）
+            // 文字与装饰左右分列（HStack），修复原 ZStack 叠放时免责小字压在山形图上的重叠
+            HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 9) {
                         Image(systemName: "sparkles")
@@ -220,13 +348,12 @@ struct CompassScreen: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 FunMountainArt()
-                    .frame(width: 130, height: 100)
-                    .padding(6)
+                    .frame(width: 118, height: 92)
+                    .padding(.bottom, 2)
             }
-            .frame(maxWidth: .infinity, minHeight: 186, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 186, alignment: .bottomLeading)
             .padding(24)
             .background(Color(hex: "F9F9E9"), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
-
             // 次方位对（fun-direction-pair：两白卡）
             HStack(spacing: 13) {
                 funPairCard(title: "当前朝向", value: cardinalName(heading))
@@ -282,9 +409,9 @@ struct CompassScreen: View {
 
     private var lockedState: some View {
         VStack(spacing: 18) {
-            Image(systemName: "safari.fill")
-                .font(.system(size: 34))
-                .foregroundStyle(Color(hex: "386E4D"))
+            // 挂锁图标（原型 lucide lock-keyhole：锁体 + 锁孔 + 弓形提手）
+            LockKeyholeIcon()
+                .frame(width: 34, height: 34)
             Text("开启完整罗盘体验")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(Color(hex: "386E4D"))
@@ -305,11 +432,9 @@ struct CompassScreen: View {
             .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 25)
+        .padding(.vertical, 46)
         .padding(.horizontal, 24)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
-        .padding(.horizontal, 20)
-        .frame(maxHeight: .infinity)
     }
 
     // MARK: - 校准面板（方位设置与校准）
@@ -338,14 +463,14 @@ struct CompassScreen: View {
                     calibrateRow("真北（GPS 航向）",
                                  heading.map { String(format: "%.1f°", $0) } ?? "—")
                     calibrateRow("磁北（磁力计）",
-                                 model.location.magneticHeading.map { String(format: "%.1f°", $0) } ?? "—")
+                                 location.magneticHeading.map { String(format: "%.1f°", $0) } ?? "—")
                     calibrateRow("北向基准", baselineText)
                 }
                 .padding(16)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                 Button {
-                    model.location.startHeading()
+                    location.startHeading()
                 } label: {
                     Label("重新获取方位", systemImage: "arrow.triangle.2.circlepath")
                         .font(.system(size: 17, weight: .semibold))
@@ -585,6 +710,36 @@ struct DiamondHalf: Shape {
         path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.closeSubpath()
         return path
+    }
+}
+
+/// 挂锁图标（原型 lucide lock-keyhole 1:1：24 viewBox 描边几何，深绿着色）
+private struct LockKeyholeIcon: View {
+    var body: some View {
+        GeometryReader { geo in
+            let s = geo.size.width / 24
+            ZStack {
+                // 锁体：rect x=3 y=10 w=18 h=12 rx=2
+                RoundedRectangle(cornerRadius: 2 * s, style: .continuous)
+                    .stroke(Color(hex: "386E4D"), lineWidth: 2 * s)
+                    .frame(width: 18 * s, height: 12 * s)
+                    .position(x: 12 * s, y: 16 * s)
+                // 锁孔：circle cx=12 cy=16 r=1
+                Circle()
+                    .fill(Color(hex: "386E4D"))
+                    .frame(width: 2.4 * s, height: 2.4 * s)
+                    .position(x: 12 * s, y: 16 * s)
+                // 弓形提手：M7 10V7a5 5 0 0 1 10 0v3
+                Path { p in
+                    p.move(to: CGPoint(x: 7 * s, y: 10 * s))
+                    p.addLine(to: CGPoint(x: 7 * s, y: 7 * s))
+                    p.addArc(center: CGPoint(x: 12 * s, y: 7 * s), radius: 5 * s,
+                             startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+                    p.addLine(to: CGPoint(x: 17 * s, y: 10 * s))
+                }
+                .stroke(Color(hex: "386E4D"), lineWidth: 2 * s)
+            }
+        }
     }
 }
 

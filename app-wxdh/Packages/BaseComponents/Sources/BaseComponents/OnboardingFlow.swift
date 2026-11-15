@@ -293,30 +293,15 @@ public struct OnboardingFlow: View {
 
     private func pageView(_ image: String) -> some View {
         // 需求 05：三张独立实景，顶部只保留主标题与说明靠下；全部「下一步」，2/3 有「上一步」。
-        // 【Bug 行4】素材图右上角烘入了「01 / 03」页码（与手机状态栏图标重叠），
-        // 代码用左下角页码点阵样式在右上角画一块同色遮块盖住烘入数字（保留左下角点阵）。
+        // 【页码移除】素材图右上角烘入的「01/03」白色页码已直接从 PNG 擦除
+        // （左右背景色横向渐变修补），无需代码遮块；左下角页码点阵同样不再需要——
+        // 按需求整页无页码指示。
         GeometryReader { geo in
             ZStack(alignment: .bottom) {
                 // 背景层：引导图/视频铺满全屏含安全区（mp4 自动循环播放，作动态背景）
                 AssetMedia(path: image, contentMode: .fill)
                     .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
                     .clipped()
-
-                // 【Bug 行4】右上角遮块：盖住素材烘入的页码数字（含状态栏安全区）。
-                // 引导图顶部是天空/海面渐变，用同系浅青白圆角块 + 轻模糊过渡，视觉不突兀。
-                VStack {
-                    HStack {
-                        Spacer()
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(hex: "E8F0EE").opacity(0.92))
-                            .frame(width: 86, height: 30)
-                            .blur(radius: 6)
-                    }
-                    .padding(.trailing, 14)
-                    Spacer()
-                }
-                .frame(height: 120)
-                .allowsHitTesting(false)
 
                 // 前景层：底部一行按钮（第 2/3 页左侧「上一步」+ 右侧「下一步」）
                 HStack(spacing: 12) {

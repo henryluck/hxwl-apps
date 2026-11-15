@@ -107,6 +107,9 @@ struct ShellRootView: View {
         .onChange(of: finishedOnboarding) { done in
             // 引导页走完（含末尾订阅页被关闭）→ 检查 isPro + retention 决定是否弹挽留页（已购挽留不再弹）
             if done {
+                // 【防二弹】引导末页自带订阅页（startup 场景），本次启动已展示过订阅内容：
+                // 冷启动订阅墙（unlock 场景）不得再弹，didTriggerPaywall 一并置位锁死。
+                didTriggerPaywall = true
                 if capabilities.pay.isPro {
                     seenPaywall = true
                 } else if shouldOfferRetention {
@@ -276,12 +279,18 @@ struct ShellRootView: View {
     private func tryTriggerPaywall() {
         guard entitlementReady, splashSequenceDone, !didTriggerPaywall else { return }
         #if DEBUG
-        // 联调/截图：PAY_DEBUG_NO_WALL=1 抑制冷启动订阅墙（功能页截图用，仅 DEBUG）
+        // 联调/截图：PAY_DEBUG_NO_WALL=1 抑制冷启动订阅墙（功能页截图用，仅 DEBUG）。
+        // UserDefaults(debug.noWall=1) 等效兜底——沙盒 shell 下 SIMCTL_CHILD_* env 注入不稳定。
         if ProcessInfo.processInfo.environment["PAY_DEBUG_NO_WALL"] == "1" { return }
+        if UserDefaults.standard.bool(forKey: "debug.noWall") { return }
         #endif
         if capabilities.pay.isPro { return }   // 已订阅 → 什么都不弹
-        // 引导流程显示中不弹（引导末尾自带订阅页）；needsOnboarding 含 DEBUG 老用户覆盖
-        guard !needsOnboarding else { return }
+        // 引导流程显示中不弹（引导末尾自带订阅页）；needsOnboarding 含 DEBUG 老用户覆盖。
+        // 【防二弹·时序】splashSequenceDidFinish 通知可能晚于引导完成到达（低端机视频解码慢、
+        // 用户快速走完引导）：此刻 needsOnboarding 已 false、didTriggerPaywall 仍 false，
+        // 冷启动订阅墙（unlock，含终身卡）会再弹一次——用户在引导后看到"终身会员订阅页"即此因。
+        // finishedOnboarding==true 说明本次启动已走过引导（末页自带订阅页），直接跳过。
+        guard !needsOnboarding, !finishedOnboarding else { return }
         didTriggerPaywall = true
         paywallVariant = .unlock
         DispatchQueue.main.async { showPaywall = true }

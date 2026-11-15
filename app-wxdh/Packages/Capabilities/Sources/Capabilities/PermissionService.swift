@@ -149,6 +149,13 @@ public enum PermissionFlowController {
     /// 必须在订阅页/挽留页完全消失之后调用（宿主 ShellRootView 负责时序）。
     @MainActor
     public static func runIfNeeded() async {
+        #if DEBUG
+        // 联调/截图：PERMISSION_DEBUG_SKIP=1 完全跳过权限流程（含定位通知），仅 DEBUG。
+        // 支持环境变量或 UserDefaults(debug.permissionSkip=1)——模拟器自动化场景
+        // env 注入不可靠时用 defaults write 兜底。
+        if ProcessInfo.processInfo.environment["PERMISSION_DEBUG_SKIP"] == "1"
+            || UserDefaults.standard.bool(forKey: "debug.permissionSkip") { return }
+        #endif
         guard !hasCompleted else {
             // 已跑过：仍通知 NavKit 补一次定位状态刷新（用户可能在设置里改过）
             NotificationCenter.default.post(name: .permissionFlowDidFinish, object: nil)

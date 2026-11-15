@@ -123,7 +123,9 @@ public enum PaywallPlanCopyResolver {
     }
 
     static func defaultPrice(isTrial: Bool, trialDays: Int, intro: String, renewText: String) -> String {
-        isTrial ? "免费试用\(trialDays)天" : "首周 \(intro.replacingOccurrences(of: "¥", with: ""))"
+        // 【Bug 行3·分流路径】价格大字统一「￥X」：套餐标题已含首周语义（新人优惠首周），
+        // 价格不带「首周」前缀；intro 去掉可能的 ¥ 符号再加全角￥。
+        isTrial ? "免费试用\(trialDays)天" : "￥\(intro.replacingOccurrences(of: "¥", with: "").replacingOccurrences(of: "￥", with: ""))"
     }
 
     static func defaultTag(isTrial: Bool) -> String? {

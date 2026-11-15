@@ -41,9 +41,13 @@ public final class LocationService: NSObject, ObservableObject {
     @Published public private(set) var isContinuous = false
 
     private let manager = CLLocationManager()
-    private var singleFixContinuation: CheckedContinuation<LocationSnapshot?, Never>?
+    /// 单次定位在途的等待者（可多个并发复用同一结果）
+    private var singleFixContinuations: [CheckedContinuation<LocationSnapshot?, Never>] = []
     private var singleFixTimeout: Task<Void, Never>?
     private var continuousHandler: ((LocationSnapshot) -> Void)?
+    /// 授权等待者（notDetermined 弹窗期间挂起，用户选择或超时后一起唤醒）
+    private var authWaiters: [CheckedContinuation<Bool, Never>] = []
+    private var authTimeout: Task<Void, Never>?
 
     public override init() {
         super.init()
@@ -79,49 +83,96 @@ public final class LocationService: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - 单次定位（NAV-04：防重复，只保留一项在途）
+    /// 请求授权并等待用户给出明确结果（或超时）。
+    /// - 返回 true：权限已可用（authorized/approximate）
+    /// - 返回 false：仍未授权（拒绝/受限/系统关闭/超时未响应）
+    public func waitForAuthorization(timeout: TimeInterval = 30) async -> Bool {
+        refreshAuthState()
+        if authState.isUsable { return true }
+        if authState != .notDetermined { return false }
+
+        requestAuthorization()
+        let granted: Bool = await withCheckedContinuation { cont in
+            authWaiters.append(cont)
+            authTimeout?.cancel()
+            authTimeout = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard let self else { return }
+                    self.finishAuthWait(granted: self.authState.isUsable)
+                }
+            }
+        }
+        return granted
+    }
+
+    /// 唤醒所有授权等待者（授权回调或超时；只结算一次）
+    private func finishAuthWait(granted: Bool) {
+        authTimeout?.cancel()
+        authTimeout = nil
+        let waiters = authWaiters
+        authWaiters.removeAll()
+        for cont in waiters {
+            cont.resume(returning: granted)
+        }
+    }
+
+    // MARK: - 单次定位（NAV-04：并发请求共享同一次系统调用，无轮询、无泄漏）
+
+    /// 有快照且仍然新鲜（可作为规划起点）时直接复用，不再发起系统定位
+    private func freshSnapshot() -> LocationSnapshot? {
+        guard let snap = snapshot, snap.isUsable else { return nil }
+        return snap
+    }
+
+    /// 有在途定位时加入等待列表，随该次定位一起返回（可能为 nil）
+    private func joinInFlightFix() async -> LocationSnapshot? {
+        await withCheckedContinuation { cont in
+            singleFixContinuations.append(cont)
+        }
+    }
+
+    /// 结束本轮单次定位：唤醒所有等待者并清理状态
+    private func finishSingleFix(with result: LocationSnapshot?, error: NavFailure?) {
+        singleFixTimeout?.cancel()
+        singleFixTimeout = nil
+        let waiters = singleFixContinuations
+        singleFixContinuations.removeAll()
+        isLocating = false
+        if let error { lastError = error }
+        for cont in waiters {
+            cont.resume(returning: result)
+        }
+    }
 
     @discardableResult
-    public func requestSingleFix(timeout: TimeInterval = 12) async -> LocationSnapshot? {
+    public func requestSingleFix(timeout: TimeInterval = 8) async -> LocationSnapshot? {
         refreshAuthState()
         guard authState.isUsable else {
             lastError = authState == .servicesOff ? .locationServicesOff : .locationDenied
             return nil
         }
-        if let existing = singleFixContinuation {
-            // 已有在途请求：复用同一结果，不发起第二个任务
-            return await withCheckedContinuation { cont in
-                Task { @MainActor in
-                    let result = await self.awaitExisting()
-                    cont.resume(returning: result)
-                }
-            }
-        }
+        // 已有新鲜快照：直接返回（NAV-38 快照年龄与精度达标的真实数据可复用）
+        if let fresh = freshSnapshot() { return fresh }
+        // 已有在途请求：并入等待，共享同一结果
+        if isLocating { return await joinInFlightFix() }
+
         isLocating = true
         lastError = nil
-        return await withCheckedContinuation { continuation in
-            singleFixContinuation = continuation
-            manager.requestLocation()
-            singleFixTimeout?.cancel()
-            singleFixTimeout = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    guard let self, let cont = self.singleFixContinuation else { return }
-                    self.singleFixContinuation = nil
-                    self.isLocating = false
-                    self.lastError = .weakLocation
-                    cont.resume(returning: nil)
-                }
+        manager.requestLocation()
+        singleFixTimeout?.cancel()
+        singleFixTimeout = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self else { return }
+                // 超时兜底：若期间已收到可用快照（虽过期未唤醒的边缘）优先用数据
+                let result = self.freshSnapshot()
+                self.finishSingleFix(with: result, error: result == nil ? .weakLocation : nil)
             }
         }
-    }
-
-    private func awaitExisting() async -> LocationSnapshot? {
-        while isLocating {
-            try? await Task.sleep(nanoseconds: 150_000_000)
-        }
-        return snapshot
+        return await joinInFlightFix()
     }
 
     // MARK: - 连续定位（活动导航会话；结束即释放，NAV-31/39）
@@ -174,15 +225,19 @@ extension LocationService: CLLocationManagerDelegate {
     public nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         Task { @MainActor in
             self.refreshAuthState()
+            // 授权回调：有明确结果即唤醒等待者（含被拒绝的情形，等待方按 false 分流）
+            if self.authState != .notDetermined, !self.authWaiters.isEmpty {
+                self.finishAuthWait(granted: self.authState.isUsable)
+            }
             // 撤权后不得继续显示正常定位（NAV-03）
             if !self.authState.isUsable {
                 self.snapshot = nil
-                self.lastError = self.authState == .servicesOff ? .locationServicesOff : .locationDenied
                 if self.isContinuous { self.stopContinuous() }
-                if let cont = self.singleFixContinuation {
-                    self.singleFixContinuation = nil
-                    self.isLocating = false
-                    cont.resume(returning: nil)
+                if self.isLocating {
+                    let error: NavFailure = self.authState == .servicesOff ? .locationServicesOff : .locationDenied
+                    self.finishSingleFix(with: nil, error: error)
+                } else {
+                    self.lastError = self.authState == .servicesOff ? .locationServicesOff : .locationDenied
                 }
             }
         }
@@ -191,16 +246,13 @@ extension LocationService: CLLocationManagerDelegate {
     public nonisolated func locationManager(_ manager: CLLocationManager,
                                             didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
-        // 过期回调不采纳（NAV-38）
-        guard abs(location.timestamp.timeIntervalSinceNow) < 30 else { return }
         Task { @MainActor in
             let snap = LocationSnapshot(location)
             self.snapshot = snap
-            if let cont = self.singleFixContinuation {
-                self.singleFixContinuation = nil
-                self.isLocating = false
-                self.singleFixTimeout?.cancel()
-                cont.resume(returning: snap)
+            if self.isLocating {
+                // 无论新值新鲜与否都结束本轮等待：调用方拿到最新数据后按 isUsable 自行分流，
+                // 避免旧缓存把等待者挂死到超时
+                self.finishSingleFix(with: snap, error: nil)
             }
             self.continuousHandler?(snap)
         }
@@ -209,17 +261,17 @@ extension LocationService: CLLocationManagerDelegate {
     public nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         Task { @MainActor in
             let nsError = error as NSError
+            let failure: NavFailure
             if nsError.code == CLError.denied.rawValue {
-                self.lastError = .locationDenied
                 self.refreshAuthState()
+                failure = self.authState == .servicesOff ? .locationServicesOff : .locationDenied
             } else {
-                self.lastError = .locationUnavailable
+                failure = .locationUnavailable
             }
-            if let cont = self.singleFixContinuation {
-                self.singleFixContinuation = nil
-                self.isLocating = false
-                self.singleFixTimeout?.cancel()
-                cont.resume(returning: nil)
+            if self.isLocating {
+                self.finishSingleFix(with: nil, error: failure)
+            } else {
+                self.lastError = failure
             }
         }
     }

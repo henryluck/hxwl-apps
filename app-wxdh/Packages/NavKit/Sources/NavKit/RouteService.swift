@@ -28,37 +28,76 @@ public final class RouteService {
         request.requestsAlternateRoutes = true
 
         let directions = MKDirections(request: request)
+        // 算路超时兜底（15s）：MKDirections 偶发不回调会让规划页永远停在
+        // 「正在规划…」且开始按钮灰死（用户反馈"规划路线经常卡死"）。
+        // 竞速实现：正常返回/报错走原分类，超时按服务错误分流，UI 可重试。
+        let response: MKDirections.Response?
         do {
-            let response = try await directions.calculate()
-            var options: [RouteOption] = []
-            var seenSignatures = Set<String>()
-            for (index, route) in response.routes.enumerated() {
-                let polyline = Self.coordinates(from: route.polyline)
-                // 重复线过滤：几何签名一致视为同一条（NAV-17）
-                let signature = Self.signature(polyline)
-                if seenSignatures.contains(signature) { continue }
-                seenSignatures.insert(signature)
-
-                let steps = Self.steps(from: route)
-                let option = RouteOption(
-                    id: "\(requestId)#\(index)",
-                    mode: mode,
-                    distance: route.distance,
-                    expectedTravelTime: route.expectedTravelTime,
-                    steps: steps,
-                    polyline: polyline,
-                    engineLabel: index == 0 ? "推荐" : "备选\(index)",
-                    requestId: requestId)
-                options.append(option)
-                if options.count >= 3 { break }
+            response = try await Self.withTimeout(seconds: 15) {
+                try await directions.calculate()
             }
-            guard !options.isEmpty else {
-                return RouteResult(routes: [], failure: .noRoute)
-            }
-            return RouteResult(routes: options, failure: nil)
         } catch {
             return RouteResult(routes: [], failure: Self.classify(error, mode: mode))
         }
+        guard let response else {
+            directions.cancel()
+            return RouteResult(routes: [], failure: .serviceError)
+        }
+
+        var options: [RouteOption] = []
+        var seenSignatures = Set<String>()
+        for (index, route) in response.routes.enumerated() {
+            let polyline = Self.coordinates(from: route.polyline)
+            // 重复线过滤：几何签名一致视为同一条（NAV-17）
+            let signature = Self.signature(polyline)
+            if seenSignatures.contains(signature) { continue }
+            seenSignatures.insert(signature)
+
+            let steps = Self.steps(from: route)
+            let option = RouteOption(
+                id: "\(requestId)#\(index)",
+                mode: mode,
+                distance: route.distance,
+                expectedTravelTime: route.expectedTravelTime,
+                steps: steps,
+                polyline: polyline,
+                engineLabel: index == 0 ? "推荐" : "备选\(index)",
+                requestId: requestId)
+            options.append(option)
+            if options.count >= 3 { break }
+        }
+        guard !options.isEmpty else {
+            return RouteResult(routes: [], failure: .noRoute)
+        }
+        return RouteResult(routes: options, failure: nil)
+    }
+
+    /// 竞速超时：操作先完成返回其结果；超时先到返回 nil（错误照常抛出由调用方分类）
+    private static func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T? {
+        try await withThrowingTaskGroup(of: TimeoutRace<T>.self) { group in
+            group.addTask {
+                let value = try await operation()
+                return .value(value)
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return .timedOut
+            }
+            guard let first = try await group.next() else { return nil }
+            group.cancelAll()
+            switch first {
+            case .value(let value): return value
+            case .timedOut: return nil
+            }
+        }
+    }
+
+    private enum TimeoutRace<T: Sendable>: Sendable {
+        case value(T)
+        case timedOut
     }
 
     // MARK: - 映射

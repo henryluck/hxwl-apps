@@ -31,7 +31,7 @@ final class PaywallPlanCopyTests: XCTestCase {
                                                    storeKitIntro: nil, storeKitRenew: nil,
                                                    fallbackIntro: "¥5.8", fallbackRenew: "¥58")
         XCTAssertEqual(copy.title, "新人优惠首周")
-        XCTAssertEqual(copy.price, "首周 1.8")
+        XCTAssertEqual(copy.price, "￥1.8")
         XCTAssertEqual(copy.subtitle, "之后¥48/周，自动续费")
         XCTAssertEqual(copy.tag, "新人优惠")
     }
@@ -89,7 +89,7 @@ final class PaywallPlanCopyTests: XCTestCase {
                                                    eligible: true,
                                                    storeKitIntro: "¥8", storeKitRenew: "¥48.00",
                                                    fallbackIntro: "¥5.8", fallbackRenew: "¥58")
-        XCTAssertEqual(copy.price, "首周 8")
+        XCTAssertEqual(copy.price, "￥8")
         XCTAssertEqual(copy.subtitle, "之后¥48.00/周，自动续费")
     }
 
@@ -127,7 +127,7 @@ final class PaywallPlanCopyTests: XCTestCase {
                                                    eligible: true,
                                                    storeKitIntro: "¥0.00", storeKitRenew: "¥0.00",
                                                    fallbackIntro: "¥5.8", fallbackRenew: "¥58")
-        XCTAssertEqual(copy.price, "首周 5.8")
+        XCTAssertEqual(copy.price, "￥5.8")
         XCTAssertFalse(copy.price.contains("0.00"))
         XCTAssertEqual(copy.subtitle, "之后¥58/周，自动续费")
     }

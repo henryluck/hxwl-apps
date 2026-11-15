@@ -263,6 +263,16 @@ private struct AutoPaywallReminder: ViewModifier {
     @State private var timer: Task<Void, Never>?
     @State private var fired = false
 
+    /// DEBUG 自动化兜底：沙盒 shell 下 SIMCTL_CHILD_* env 注入不稳定，
+    /// UserDefaults(debug.noAutoPaywall=1) 可同样抑制 10 秒自动订阅提醒
+    private static var debugSuppressed: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "debug.noAutoPaywall")
+        #else
+        return false
+        #endif
+    }
+
     func body(content: Content) -> some View {
         content
             .onAppear { fired = false; restart() }
@@ -284,7 +294,7 @@ private struct AutoPaywallReminder: ViewModifier {
 
     private func restart() {
         cancel()
-        guard active, !fired, scenePhase == .active else { return }
+        guard active, !fired, scenePhase == .active, !Self.debugSuppressed else { return }
         timer = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             guard !Task.isCancelled else { return }
@@ -298,5 +308,89 @@ extension View {
     /// 未解锁页面自动提醒：连续停留 10 秒拉起订阅页（关闭后重新计时）
     func autoPaywallReminder(active: Bool) -> some View {
         modifier(AutoPaywallReminder(active: active))
+    }
+}
+
+// MARK: - Bundle 素材图（NavKit 内部用）
+/// 与 BaseComponents 的 AssetImage 同名同实现：NavKit 不依赖 BaseComponents，
+/// 海拔页 hero 实景图等 Bundle 图片加载在此自含（internal，不跨包泄漏）。
+struct AssetImage: View {
+    let path: String
+    var contentMode: ContentMode = .fill
+
+    var body: some View {
+        if let url = Bundle.main.resourceURL?.appendingPathComponent(path),
+           let uiImage = UIImage(contentsOfFile: url.path) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .aspectRatio(contentMode: contentMode)
+        } else {
+            Color(.systemGray5)
+        }
+    }
+}
+
+// MARK: - 页头「我的 | 会员」胶囊（四页统一组件，对齐原型 gentle-account）
+/// 原型样式：白底胶囊 + 细分隔线；「我的」深绿人形+文字；
+/// 「会员」金色渐变皇冠（右上闪光点缀）+ 红橙文字 #B45418。
+struct AccountMemberCapsule: View {
+    let model: NavAppModel
+    /// 深色背景页（天气）白底不透明度更高，保证白字可读；浅色页用略透明
+    var onDarkBackground: Bool = false
+    var height: CGFloat = 40
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button {
+                model.showProfile = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "person")
+                        .font(.system(size: 14, weight: .medium))
+                    Text("我的")
+                        .font(.system(size: 15, weight: .medium))
+                }
+                .foregroundStyle(Color(hex: "1E5038"))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("我的")
+
+            Rectangle()
+                .fill(Color(hex: "C9E2D2"))
+                .frame(width: 1, height: 17)
+                .padding(.horizontal, 6)
+
+            Button {
+                _ = model.requireMembership()
+            } label: {
+                HStack(spacing: 5) {
+                    // 金色渐变皇冠（原型为独立金 SVG：#F9B950 主体 + 高光 #FFE29C）
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(
+                            LinearGradient(colors: [Color(hex: "FFD97E"), Color(hex: "F0A93C")],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                        )
+                        // 原型皇冠右上角有小闪光点缀（✦），SF Symbols 无对应图标，用小星叠加
+                        .overlay(alignment: .topTrailing) {
+                            Image(systemName: "sparkle")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(Color(hex: "FFD97E"))
+                                .offset(x: 5, y: -4)
+                        }
+                    Text("会员")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color(hex: "B45418"))
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("会员中心")
+        }
+        .padding(.horizontal, 10)
+        .frame(height: height)
+        .background(Color.white.opacity(onDarkBackground ? 0.93 : 0.94), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color(hex: "FFFFFF").opacity(0.6), lineWidth: 0.5))
+        .shadow(color: Color(hex: "164C2C").opacity(onDarkBackground ? 0.07 : 0.10),
+                radius: onDarkBackground ? 16 : 10, x: 0, y: 3)
     }
 }

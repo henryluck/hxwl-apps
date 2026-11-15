@@ -143,14 +143,29 @@ final class ScreenCaptureTests: XCTestCase {
                 if clean.waitForExistence(timeout: 3) {
                     clean.tap()
                     sleep(2)
-                    // 系统确认框：Allow "…" to hide N photos? → Hide（可能挂在 SpringBoard 上）
+                    // 系统确认框由执行方式决定：
+                    // 旧实现 isHidden → 「隐藏 / Hide」；现实现 deleteAssets → 「删除 / Delete」。
+                    // 优先匹配删除，隐藏仅作旧包兼容；弹窗可能挂在 SpringBoard 或 App 上。
+                    // 同时留一张弹窗截图，作为「清理=删除」的回归证据。
                     let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-                    let candidates: [XCUIElement] = [app.alerts.buttons["Hide"],
-                                                     sb.alerts.buttons["Hide"],
-                                                     sb.buttons["Hide"],
-                                                     app.buttons["Hide"]]
-                    for btn in candidates where btn.waitForExistence(timeout: 3) {
-                        if btn.isHittable { btn.tap(); break }
+                    let titles = ["删除", "Delete", "隐藏", "Hide"]
+                    var tapped = false
+                    for _ in 0..<6 {
+                        if tapped { break }
+                        for title in titles {
+                            let candidates = [sb.alerts.buttons[title], sb.buttons[title],
+                                              app.alerts.buttons[title], app.buttons[title]]
+                            if let btn = candidates.first(where: { $0.exists && $0.isHittable }) {
+                                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                                shot.name = "clean_system_confirmation"
+                                shot.lifetime = .keepAlways
+                                add(shot)
+                                btn.tap()
+                                tapped = true
+                                break
+                            }
+                        }
+                        if !tapped { sleep(1) }
                     }
                     sleep(6)
                     attach(app, "13-清理完成")

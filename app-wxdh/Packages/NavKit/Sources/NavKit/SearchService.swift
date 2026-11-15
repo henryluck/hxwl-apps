@@ -233,7 +233,12 @@ public final class SearchService: NSObject, ObservableObject {
                     .filter { Geo.distance(center, $0.placemark.coordinate) <= radius }
                     .map { Self.place(from: $0, source: .mapSearch, category: category.title) }
             } catch {
-                failure = Self.classify(error)
+                // 【钓点空列表】搜索零结果在 Apple 地图上可能以 placemarkNotFound 报错，
+                // 这在周边搜索语义里是「附近没有」而非「路线失败」（.noRoute 文案
+                // 「暂未找到适合此方式的路线」是路线语境，用户看到会困惑）——
+                // 周边场景统一按普通服务错误分类，零结果交由上层走空态展示。
+                let classified = Self.classify(error)
+                failure = (classified == .noRoute) ? .serviceError : classified
             }
         }
 

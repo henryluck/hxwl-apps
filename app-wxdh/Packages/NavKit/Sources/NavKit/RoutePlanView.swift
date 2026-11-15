@@ -336,7 +336,7 @@ struct RoutePlanView: View {
                         .font(.system(size: 13))
                     Spacer()
                     if startFailure == .locationUnavailable || startFailure == .weakLocation {
-                        Button("重试定位") { Task { await model.locate() } }
+                        Button("重试定位") { Task { await retryLocationAndReplan() } }
                             .font(.system(size: 13, weight: .semibold))
                     }
                 }
@@ -466,12 +466,21 @@ struct RoutePlanView: View {
         if let failure { startFailure = failure }
     }
 
+    /// 规划页内的定位重试：走模型层统一入口（重定位成功自动重规划/重启导航），
+    /// 修复「重试定位只挪地图、失败横幅永远不消失」的死循环观感
+    private func retryLocationAndReplan() async {
+        startFailure = nil
+        if let failure = await model.retryLocationAndReload() {
+            startFailure = failure
+        }
+    }
+
     private func handle(_ action: NavFailureAction) {
         switch action {
         case .retry:
             Task { await model.plan() }
         case .retryLocation:
-            Task { await model.locate() }
+            Task { await retryLocationAndReplan() }
         case .openSettings:
             model.location.openAppSettings()
         case .pickPlace:

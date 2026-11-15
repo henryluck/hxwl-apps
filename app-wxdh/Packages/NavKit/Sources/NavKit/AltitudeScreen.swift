@@ -14,6 +14,10 @@ struct AltitudeScreen: View {
 
     private var snapshot: LocationSnapshot? { model.location.snapshot }
 
+    /// 未订阅时锁定数据展示（对齐原型 alt-page-v14 锁定态）：
+    /// 大数字显示「——」占位，胶囊标签为固定 slogan，不暴露真实海拔/更新时间
+    private var locked: Bool { !model.isUnlocked }
+
     var body: some View {
         ZStack {
             // 原型 alt-page：#f6faf7 底色
@@ -21,7 +25,7 @@ struct AltitudeScreen: View {
 
             VStack(spacing: 0) {
                 hero
-                if !model.isUnlocked {
+                if locked {
                     Spacer(minLength: 0)
                     gate
                     Spacer(minLength: 0)
@@ -36,15 +40,16 @@ struct AltitudeScreen: View {
             }
         }
         .task {
-            if snapshot == nil { await model.locate() }
+            // 锁定态不请求定位（数据已锁，不浪费定位调用）；解锁进入后若无快照再定位
+            if !locked, snapshot == nil { await model.locate() }
         }
         .sheet(isPresented: $showRecordSheet) { recordSheet }
         .sheet(isPresented: $showHistory) { historySheet }
         // 未解锁时连续停留 10 秒自动提醒（关闭订阅页后重新计时）
-        .autoPaywallReminder(active: !model.isUnlocked)
+        .autoPaywallReminder(active: locked)
     }
 
-    // MARK: - Hero 区（alt-hero：渐变 + 远山插画 + 大读数）
+    // MARK: - Hero 区（alt-hero：实景照片 + 大读数，对齐原型 alt-page-v14）
 
     private var hero: some View {
         VStack(spacing: 0) {
@@ -52,19 +57,19 @@ struct AltitudeScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
 
-            Spacer(minLength: 14)
+            Spacer(minLength: 10)
 
             // alt-reading-label
             Text("当前位置海拔")
                 .font(.system(size: 17))
                 .foregroundStyle(Color(hex: "38624F"))
 
-            // alt-number：68pt 大数字 + 米
+            // alt-number：68pt 大数字 + 米（深绿 #164E38）；锁定态为「——」占位横线
             HStack(alignment: .firstTextBaseline, spacing: 9) {
                 Text(altitudeText)
-                    .font(.system(size: 68, weight: .semibold, design: .default))
+                    .font(.system(size: locked ? 44 : 68, weight: .semibold, design: .default))
                     .monospacedDigit()
-                    .foregroundStyle(Color(hex: "164E38"))
+                    .foregroundStyle(Color(hex: "164E38").opacity(locked ? 0.55 : 1))
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
                 Text("米")
@@ -73,23 +78,37 @@ struct AltitudeScreen: View {
             }
             .padding(.top, 9)
 
-            // alt-reading-note
+            // alt-reading-note：胶囊标签「更新于 09月29日 14:32」
             Text(readingNote)
-                .font(.system(size: 15))
-                .foregroundStyle(Color(hex: "466B57"))
-                .padding(.top, 4)
-
-            // 远山插画（贴 hero 底部）
-            AltLandscapeArt()
-                .frame(height: 120)
-                .frame(maxWidth: .infinity)
-                .allowsHitTesting(false)
+                .font(.system(size: 14))
+                .foregroundStyle(Color(hex: "2F5B43"))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color(hex: "F6FAF7").opacity(0.85), in: Capsule())
+                .padding(.top, 6)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 300)
+        .frame(height: 330)
+        .frame(maxWidth: .infinity, alignment: .top)
         .background(
-            LinearGradient(colors: [Color(hex: "EEF8F1"), Color(hex: "E3F2E8")],
-                           startPoint: .top, endPoint: .bottom)
+            // alt-scene-photo：远山与云海实景，顶部对齐铺满 hero，底部渐隐进页面底色
+            ZStack(alignment: .top) {
+                if let ui = BundleImageLoader.uiImage(named: "assets/alt-hero-photo.jpg") {
+                    Image(uiImage: ui)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    LinearGradient(colors: [Color(hex: "EEF8F1"), Color(hex: "DCEBE4")],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                LinearGradient(stops: [
+                    .init(color: Color(hex: "F6FAF7").opacity(0), location: 0),
+                    .init(color: Color(hex: "F6FAF7").opacity(0), location: 0.72),
+                    .init(color: Color(hex: "F6FAF7").opacity(0.55), location: 0.86),
+                    .init(color: Color(hex: "F6FAF7"), location: 1),
+                ], startPoint: .top, endPoint: .bottom)
+            }
+            .ignoresSafeArea(edges: .top)
         )
     }
 
@@ -99,39 +118,14 @@ struct AltitudeScreen: View {
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(Color(hex: "193E30"))
             Spacer()
-            // 页头「我的 / 会员」chip（fresh-account 简化：只放会员 chip，我的在 Tab 结构外）
-            Button {
-                model.showProfile = true
-            } label: {
-                Label("我的", systemImage: "person")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color(hex: "1E5038"))
-                    .padding(.horizontal, 12)
-                    .frame(height: 38)
-                    .background(Color.white.opacity(0.87), in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color(hex: "DCEBE1"), lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .padding(.trailing, 6)
-
-            Button {
-                _ = model.requireMembership()
-            } label: {
-                Label("会员", systemImage: "crown.fill")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color(hex: "533600"))
-                    .padding(.horizontal, 12)
-                    .frame(height: 38)
-                    .background(Color(hex: "FFCB4D"), in: Capsule())
-                    .shadow(color: Color(hex: "D8A20C").opacity(0.12), radius: 3, y: 2)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("会员中心")
+            // 页头「我的 / 会员」白胶囊（与导航/天气页统一组件，原型 gentle-account）
+            AccountMemberCapsule(model: model)
         }
     }
 
     private var altitudeText: String {
-        guard let snapshot else { return "—" }
+        // 锁定态：占位横线，不显示真实海拔（原型 alt-number 初始为 ——）
+        guard !locked, let snapshot else { return "——" }
         let value = Int(snapshot.altitude.rounded())
         // 原型 toLocaleString('en-US')：千分位
         let formatter = NumberFormatter()
@@ -140,6 +134,8 @@ struct AltitudeScreen: View {
     }
 
     private var readingNote: String {
+        // 锁定态：固定 slogan（原型 alt-reading-note 锁定时文案）
+        guard !locked else { return "每一段旅程，都值得记录" }
         guard let snapshot else { return "每一段旅程，都值得记录" }
         if model.location.authState.isUsable {
             return "更新于 \(NavFormat.clock(snapshot.timestamp))"
@@ -300,9 +296,9 @@ struct AltitudeScreen: View {
 
     private var gate: some View {
         VStack(spacing: 12) {
-            Image(systemName: "mountain.2.fill")
-                .font(.system(size: 26))
-                .foregroundStyle(Color(hex: "B27B24"))
+            // 原型 alt-gate：金色挂锁（lucide lock 几何）
+            LockIcon(color: Color(hex: "B98A2F"))
+                .frame(width: 30, height: 34)
                 .padding(.bottom, 12)
             Text("看看此刻，你在多高的地方")
                 .font(.system(size: 21, weight: .semibold))
@@ -509,56 +505,62 @@ struct AltitudeScreen: View {
     }
 }
 
-// MARK: - 远山插画（alt-landscape：三层山峦 + 云）
+// MARK: - hero 实景图加载（主 bundle 相对路径；NavKit 无法访问 BaseComponents 的 internal AssetImage）
 
-struct AltLandscapeArt: View {
+private enum BundleImageLoader {
+    static func uiImage(named path: String) -> UIImage? {
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent(path) else { return nil }
+        return UIImage(contentsOfFile: url.path)
+    }
+}
+
+// MARK: - 金色挂锁图标（原型 alt-gate 的 lucide lock 几何：锁弓 + 圆角锁体描边 + 锁孔）
+
+private struct LockIcon: View {
+    var color: Color
+
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
+        GeometryReader { proxy in
+            let w = proxy.size.width
+            let h = proxy.size.height
+            let bodyRect = CGRect(x: w * 0.10, y: h * 0.46, width: w * 0.80, height: h * 0.50)
+            let radius = w * 0.16
+            let lineWidth = w * 0.10
             ZStack {
-                // 远层山（最浅）
-                Mountain(range: [0.95, 0.55, 0.78, 0.4, 0.72])
-                    .fill(Color(hex: "D3E8DB").opacity(0.7))
-                // 中层山
-                Mountain(range: [1.0, 0.62, 0.5, 0.72, 0.34])
-                    .fill(Color(hex: "BFDCCB").opacity(0.8))
-                // 近层山（最深）
-                Mountain(range: [0.72, 0.4, 0.85, 0.52, 1.0])
-                    .fill(Color(hex: "A8CBB7"))
-                // 云（两朵圆角长条）
-                Cloud()
-                    .frame(width: w * 0.22, height: h * 0.09)
-                    .position(x: w * 0.24, y: h * 0.3)
-                Cloud()
-                    .frame(width: w * 0.16, height: h * 0.08)
-                    .position(x: w * 0.7, y: h * 0.2)
+                // 锁弓：半圆 + 两段竖线
+                ShackleShape()
+                    .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                // 锁体：圆角矩形描边
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(color, lineWidth: lineWidth)
+                    .frame(width: bodyRect.width, height: bodyRect.height)
+                    .position(x: bodyRect.midX, y: bodyRect.midY)
+                // 锁孔：圆点
+                Circle()
+                    .fill(color)
+                    .frame(width: w * 0.16, height: w * 0.16)
+                    .position(x: w / 2, y: bodyRect.midY - bodyRect.height * 0.08)
             }
         }
-        .clipped()
     }
 
-    /// 山峦：以归一化高度采样点连成折线，闭合到底
-    private struct Mountain: Shape {
-        let range: [CGFloat]   // 0~1，相对 hero 高度的采样高度
+    /// 锁弓形状：bodyRect 顶部向上拱起的倒 U
+    private struct ShackleShape: Shape {
         func path(in rect: CGRect) -> Path {
-            var path = Path()
-            let n = range.count - 1
-            path.move(to: CGPoint(x: 0, y: rect.height))
-            for (i, v) in range.enumerated() {
-                let x = rect.width * CGFloat(i) / CGFloat(n)
-                let y = rect.height * (1 - v)
-                path.addLine(to: CGPoint(x: x, y: y))
-            }
-            path.addLine(to: CGPoint(x: rect.width, y: rect.height))
-            path.closeSubpath()
-            return path
-        }
-    }
-
-    private struct Cloud: View {
-        var body: some View {
-            Capsule().fill(Color.white.opacity(0.8))
+            var p = Path()
+            let leftX = rect.width * 0.24
+            let rightX = rect.width * 0.76
+            let topY = rect.height * 0.50
+            let radius = (rightX - leftX) / 2
+            let centerY = topY + radius
+            p.move(to: CGPoint(x: leftX, y: rect.height * 0.96))
+            p.addLine(to: CGPoint(x: leftX, y: centerY))
+            p.addArc(center: CGPoint(x: rect.width / 2, y: centerY),
+                     radius: radius,
+                     startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+            p.addLine(to: CGPoint(x: rightX, y: rect.height * 0.96))
+            return p
         }
     }
 }
+

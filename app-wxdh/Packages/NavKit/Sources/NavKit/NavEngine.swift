@@ -113,6 +113,18 @@ public final class NavEngine: ObservableObject {
         case alreadyActive
     }
 
+    /// 单次定位拿起点：优先复用新鲜快照（ indoor/弱 GPS 不再必然失败），失败按真实原因分流
+    private func originFix() async throws -> LocationSnapshot {
+        if let fix = await location.requestSingleFix(), fix.isUsable {
+            return fix
+        }
+        // 定位不可用还要看是不是权限问题，提示与修复动作完全不同（失败分流表）
+        if !location.authState.isUsable {
+            throw StartFailure.location(location.authState == .servicesOff ? .locationServicesOff : .locationDenied)
+        }
+        throw StartFailure.location(.locationUnavailable)
+    }
+
     public func start(origin: Place, destination: Place) async throws {
         guard !phase.isActiveSession, !startInFlight else { throw StartFailure.alreadyActive }
         guard let route = selectedRoute else { throw StartFailure.noRoute }
@@ -121,35 +133,25 @@ public final class NavEngine: ObservableObject {
         phase = .starting
         defer { startInFlight = false }
 
-        // 起点不是当前位置时，实时导航不能把设备瞬移过去（NAV-19）
+        // 实时导航必须从设备真实位置起步（NAV-19 不可瞬移）：
+        // 手选远起点、或设备起点在规划后已位移超过 120m → 用当前位置重算
+        let fix = try await originFix()
+        let devicePlace = fix.place
         var startOrigin = origin
-        if origin.source != .device {
-            guard let fix = await location.requestSingleFix(), fix.isUsable else {
+        if origin.distance(to: devicePlace) > 120 {
+            let requestId = nextRequestId()
+            let result = await router.routes(from: devicePlace, to: destination,
+                                             mode: route.mode, requestId: requestId)
+            guard requestId == currentRequestId, let fresh = result.routes.first else {
                 phase = .ready
-                throw StartFailure.location(.locationUnavailable)
+                // 算路失败按真实原因透传（offline/serviceError 等），不再笼统报「无法获取位置」
+                throw result.failure.map(StartFailure.location) ?? StartFailure.noRoute
             }
-            let devicePlace = fix.place
-            if origin.distance(to: devicePlace) > 120 {
-                // 用当前位置重算到原终点
-                let requestId = nextRequestId()
-                let result = await router.routes(from: devicePlace, to: destination,
-                                                 mode: route.mode, requestId: requestId)
-                guard requestId == currentRequestId, let fresh = result.routes.first else {
-                    phase = .ready
-                    throw StartFailure.location(.locationUnavailable)
-                }
-                routes = result.routes
-                selectedRouteId = fresh.id
-                startOrigin = devicePlace
-            } else {
-                startOrigin = devicePlace
-            }
+            routes = result.routes
+            selectedRouteId = fresh.id
+            startOrigin = devicePlace
         } else {
-            guard let fix = await location.requestSingleFix(), fix.isUsable else {
-                phase = .ready
-                throw StartFailure.location(.locationUnavailable)
-            }
-            startOrigin = fix.place
+            startOrigin = devicePlace
         }
 
         guard let finalRoute = selectedRoute else {

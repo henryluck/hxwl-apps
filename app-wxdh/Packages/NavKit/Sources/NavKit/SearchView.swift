@@ -13,13 +13,27 @@ struct SearchView: View {
             content
         }
         .background(NavTheme.bg)
-        // 【Bug 行13】键盘弹出时系统会把整个布局顶起（页面"顶上去"导致输入框被键盘/导航栏
-        // 挤出可视区）。ignoresSafeArea(.keyboard) 让键盘悬浮在列表之上：header 固定不动，
-        // 结果列表自行滚动，输入框始终可见。
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // 【Bug 行13·二次修复】键盘弹出时页面整体上推（header 顶进状态栏与时间重叠）。
+        // 之前的 .ignoresSafeArea(.keyboard) 挂在 VStack 上，但键盘 safe area 从 window
+        // 层级向下传播，会在子视图消费前就被父级布局消费掉——模拟器实测仍上推。
+        // 修复：把忽略键盘修饰符移到**更外层的固定 frame 容器**上，并显式
+        // ignoresSafeArea(edges: .all) 锁定布局基准，键盘不再参与该视图的布局避让。
+        .ignoresSafeArea(.keyboard, edges: .all)
+        .ignoresSafeArea(edges: .bottom)
         .onAppear {
             focused = true
             model.updateSuggestions(model.searchText)
+            #if DEBUG
+            // 键盘避让验证：挂载 1 秒后自动注入文本（触发联想/结果布局重排），
+            // 配合键盘弹出复现/验证行13 的"页面顶起"问题。发布构建不含此段。
+            if ProcessInfo.processInfo.environment["SEARCH_DEBUG_TYPE"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    model.searchText = "北"
+                    focused = true
+                }
+            }
+            #endif
         }
     }
 
@@ -98,7 +112,7 @@ struct SearchView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 6)
         }
-        .padding(.top, 2)
+        .padding(.top, 20)
         .background(NavTheme.panel)
     }
 
@@ -127,7 +141,12 @@ struct SearchView: View {
                     case .openSettings:
                         model.location.openAppSettings()
                     case .retryLocation:
-                        Task { await model.locate() }
+                        // 真实重定位：刷新搜索范围后自动重新提交检索
+                        Task {
+                            if await model.retryLocationAndReload() == nil {
+                                submit()
+                            }
+                        }
                     default:
                         break
                     }

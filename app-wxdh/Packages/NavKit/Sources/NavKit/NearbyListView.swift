@@ -133,7 +133,12 @@ struct NearbyListView: View {
                 case .retry:
                     Task { await model.loadNearbyPage(reset: true) }
                 case .retryLocation:
-                    Task { await model.locate() }
+                    // 真实重定位并自动重载列表（原来只挪地图，失败横幅永不消失）
+                    Task {
+                        if let failure = await model.retryLocationAndReload() {
+                            model.nearbyFailure = failure
+                        }
+                    }
                 case .openSettings:
                     model.location.openAppSettings()
                 default:

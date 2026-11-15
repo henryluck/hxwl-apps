@@ -69,51 +69,7 @@ struct NavigateHomeView: View {
                 .foregroundStyle(Color(hex: "1E4D38"))
                 .shadow(color: .white.opacity(0.95), radius: 8)
             Spacer(minLength: 0)
-            HStack(spacing: 0) {
-                Button {
-                    model.showProfile = true
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("我的")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    .foregroundStyle(Color(hex: "1E5038"))
-                    .frame(height: 42)
-                    .padding(.horizontal, 10)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("我的")
-
-                Rectangle()
-                    .fill(Color(hex: "D7E7DD"))
-                    .frame(width: 1, height: 17)
-
-                Button {
-                    if model.isUnlocked {
-                        model.showProfile = true
-                    } else {
-                        model.requireMembership()
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "crown.fill")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color(hex: "E9A51B"))
-                        Text("会员")
-                            .font(.system(size: 15, weight: .bold))
-                    }
-                    .foregroundStyle(Color(hex: "B45418"))
-                    .frame(height: 42)
-                    .padding(.horizontal, 10)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(model.isUnlocked ? "会员中心" : "开通会员")
-            }
-            .background(Color.white, in: Capsule())
-            .overlay(Capsule().stroke(Color(hex: "DCEBE1"), lineWidth: 1))
-            .shadow(color: Color(hex: "214B34").opacity(0.14), radius: 12, y: 4)
+            AccountMemberCapsule(model: model, height: 42)
         }
         .padding(.horizontal, 18)
         .padding(.top, 6)

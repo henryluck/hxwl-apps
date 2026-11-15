@@ -187,6 +187,7 @@ public struct WeatherRegion: Codable, Equatable, Identifiable {
     }
 
     public var display: String {
-        district.isEmpty ? name : "\(name) \(district)"
+        guard !district.isEmpty, district != name else { return name }
+        return "\(name) \(district)"
     }
 }

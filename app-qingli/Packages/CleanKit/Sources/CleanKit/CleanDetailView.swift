@@ -98,7 +98,7 @@ public struct CleanDetailView: View {
         .alert("无法清理", isPresented: $cleanFailed) {
             Button("好", role: .cancel) {}
         } message: {
-            Text("相册权限被拒绝，无法完成清理。请在系统设置中允许完整访问后重试。")
+            Text("未能完成删除。请在系统弹窗中允许删除，并在系统设置中允许完整访问相册后重试。")
         }
     }
 
@@ -121,14 +121,14 @@ public struct CleanDetailView: View {
         // 形成下半屏图片永远填不上的空白带。列表所需的尾部间距改放在滚动内容里。
     }
 
-    /// 相似照片/视频（Bug表R9-2/9-3）：
-    /// 按天分模板展示——同一天的所有组合并到一个「日期」模板区块内，
-    /// 区块内每组一行（横向左右滑动查看多张），不再每天重复多个卡片头。
+    /// 相似照片/视频：
+    /// 需求：每一组相似图片放到一个单独的日期组卡片里——
+    /// 每张卡 = 一个日期头（日期 + 汇总 + 全选该组）+ 该组一行横向滑动缩略图。
     private var similarList: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 12) {
-                ForEach(daySections, id: \.key) { section in
-                    dayCard(section)
+                ForEach(groups) { group in
+                    groupCard(group)
                 }
                 if groups.isEmpty {
                     emptyHint
@@ -139,59 +139,38 @@ public struct CleanDetailView: View {
         }
     }
 
-    /// 按天聚合的组区块
-    private struct DaySection: Identifiable {
-        let key: String          // 「MM月dd日」
-        let groups: [CleanGroup]
-        var id: String { key }
-    }
-
-    private var daySections: [DaySection] {
-        var order: [String] = []
-        var bucket: [String: [CleanGroup]] = [:]
-        for g in groups {
-            let key = dateHeader(g)
-            if bucket[key] == nil { order.append(key) }
-            bucket[key, default: []].append(g)
-        }
-        return order.map { DaySection(key: $0, groups: bucket[$0] ?? []) }
-    }
-
-    /// 单天模板卡：标题行（日期 + 汇总 + 全选该天）→ 每组一行横向滑动缩略图
-    private func dayCard(_ section: DaySection) -> some View {
-        let dayAssets = section.groups.flatMap { $0.assets.filter { !$0.isBest } }
-        let dayAllSelected = !dayAssets.isEmpty && dayAssets.allSatisfy { selected.contains($0.id) }
-        let dayBytes = section.groups.reduce(Int64(0)) { $0 + $1.cleanableBytes }
-        let dayCount = section.groups.reduce(0) { $0 + $1.assets.count }
+    /// 单组卡：标题行（日期 + 汇总 + 全选该组）→ 该组一行横向滑动缩略图
+    private func groupCard(_ group: CleanGroup) -> some View {
+        let groupCandidates = group.assets.filter { !$0.isBest }
+        let groupAllSelected = !groupCandidates.isEmpty && groupCandidates.allSatisfy { selected.contains($0.id) }
+        let assetCount = group.assets.count
         return CleanCard {
             VStack(spacing: 10) {
                 HStack(spacing: 8) {
-                    Text(section.key)
+                    Text(dateHeader(group))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color(hex: "1A1A1A"))
-                    Text("\(dayCount)项 · \(ByteFormatter.short(dayBytes))")
+                    Text("\(assetCount)项 · \(ByteFormatter.short(group.cleanableBytes))")
                         .font(.system(size: 12))
                         .foregroundStyle(Color(hex: "9AA09C"))
                     Spacer()
                     Button {
-                        if dayAllSelected {
-                            for a in dayAssets { selected.remove(a.id) }
+                        if groupAllSelected {
+                            for a in groupCandidates { selected.remove(a.id) }
                         } else {
-                            for a in dayAssets { selected.insert(a.id) }
+                            for a in groupCandidates { selected.insert(a.id) }
                         }
                     } label: {
                         HStack(spacing: 4) {
-                            SelectBadge(selected: dayAllSelected)
-                            Text(dayAllSelected ? "取消全选" : "全选")
+                            SelectBadge(selected: groupAllSelected)
+                            Text(groupAllSelected ? "取消全选" : "全选")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Color(hex: "6B7078"))
                         }
                     }
                 }
-                // 每组一行：★最佳 + 其余照片横向滑动（Bug表R9-3）
-                ForEach(section.groups) { group in
-                    groupRow(group)
-                }
+                // 该组一行：★最佳 + 其余照片横向滑动（Bug表R9-3）
+                groupRow(group)
             }
             .padding(12)
         }
@@ -305,7 +284,7 @@ public struct CleanDetailView: View {
             kind == .livePhotos ? CleanExecutor.shared.convertLiveToStatic : CleanExecutor.shared.clean
         work(targets) { r in
             cleaning = false
-            // Bug表R9-4：系统弹窗点了「不允许」（权限被拒）→ 全部失败时留在当页，
+            // Bug表R9-4：系统删除确认框点了「不允许」→ 事务回滚，全部失败时留在当页，
             // 弹出失败提示；不进入清理成功页（否则用户误以为照片被删）。
             if r.movedCount == 0 {
                 cleaning = false
