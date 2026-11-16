@@ -23,9 +23,8 @@ struct RoutePlanView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .top) {
-                NavMapView(controller: model.mapController,
-                           satellite: false,
-                           showsUserLocation: true) { }
+                // 高德地图（与导航 SDK 同源，坐标系一致 GCJ-02）
+                AMapPlanMapView { }
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
@@ -44,13 +43,24 @@ struct RoutePlanView: View {
         .task {
             if model.engine.routes.isEmpty, model.destination != nil {
                 await model.plan()
-            } else if let route = model.engine.selectedRoute {
-                model.mapController.showRoute(route.polyline,
-                                              origin: model.originDisplay,
-                                              destination: model.destination)
-                model.mapController.fitRoute()
             }
+            refreshPlanMap()
         }
+        .onChange(of: model.engine.selectedRouteId) { _ in
+            refreshPlanMap()
+        }
+        .onChange(of: model.engine.routes.count) { _ in
+            refreshPlanMap()
+        }
+    }
+
+    /// 规划页地图：画多方案 + 起终点 + 全览
+    private func refreshPlanMap() {
+        let routes = model.engine.routes
+        guard !routes.isEmpty else { return }
+        PlanMapHolder.shared.showEndpoints(origin: model.originDisplay,
+                                           destination: model.destination)
+        PlanMapHolder.shared.showRoutes(routes, selectedId: model.engine.selectedRouteId)
     }
 
     // MARK: - 顶部起终点

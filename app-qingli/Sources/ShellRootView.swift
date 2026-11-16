@@ -13,6 +13,7 @@ struct ShellRootView: View {
     /// 挽留限购一次：购买过挽留产品后置 true，不再弹挽留页（与 RetentionView 联动）
     @AppStorage("hasPurchasedRetention") private var hasPurchasedRetention = false
     @State private var showPaywall = false
+    @State private var showSubscribed = false    // 已订阅页（r24：首页会员图标入口）
     @State private var showRetention = false       // 挽留诱导页（订阅页关闭后弹）
     /// 完成订阅页：购买成功后整屏展示（替代原来的「购买成功」弹窗）
     @State private var showSubscriptionSuccess = false
@@ -171,6 +172,18 @@ struct ShellRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: ProtoSubscriptionFlow.didSucceed)) { _ in
             // 购买成功 → 展示「完成订阅页」（购买入口各自收起自己的页面）
             showSubscriptionSuccess = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openSubscribedPage)) { _ in
+            // Bug表r24：已订阅点首页右上角会员图标 → 打开「已订阅页面」
+            showSubscribed = true
+        }
+        .fullScreenCover(isPresented: $showSubscribed) {
+            ProtoSubscribedView(
+                onClose: { showSubscribed = false },
+                onContinue: {
+                    showSubscribed = false
+                    TabSwitcher.switchTo("clean_kit")
+                })
         }
         .fullScreenCover(isPresented: $showPaywall) {
             // 原型版订阅墙（首购/复购按 isIntroEligible 自动切换文案与价格）

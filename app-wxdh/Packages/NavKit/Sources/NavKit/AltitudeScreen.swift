@@ -11,6 +11,9 @@ struct AltitudeScreen: View {
     @State private var showHistory = false
     @State private var note = ""
     @State private var copied = false
+    /// 【Bug 行20】NavStores 非 ObservableObject，保存记录后视图不会自动重读 stores；
+    /// 用刷新令牌在保存/删除后手动触发 UI 更新
+    @State private var recordsVersion = 0
 
     private var snapshot: LocationSnapshot? { model.location.snapshot }
 
@@ -410,6 +413,7 @@ struct AltitudeScreen: View {
             note: note.trimmingCharacters(in: .whitespacesAndNewlines),
             createdAt: Date())
         if model.stores.addAltitudeRecord(record) {
+            recordsVersion += 1   // 【Bug 行20】立即刷新记录数与历史列表
             showRecordSheet = false
         }
     }
@@ -453,7 +457,8 @@ struct AltitudeScreen: View {
                                     Text(NavFormat.coordinate(record.latitude, record.longitude))
                                         .font(.system(size: 14, design: .monospaced))
                                         .foregroundStyle(Color(hex: "496452"))
-                                    Text("更新于 \(NavFormat.clock(record.createdAt))")
+                                    // 【Bug 行21】固定带日期（原来今天显示 HH:mm，跨天回看分不清）
+                                    Text("保存于 \(NavFormat.dateTime(record.createdAt))")
                                         .font(.system(size: 14))
                                         .foregroundStyle(Color(hex: "496452"))
                                     if !record.note.isEmpty {
@@ -462,12 +467,13 @@ struct AltitudeScreen: View {
                                             .foregroundStyle(Color(hex: "193E30").opacity(0.85))
                                     }
                                     HStack {
-                                        Text("\(NavFormat.clock(record.createdAt)) 保存")
+                                        Text("\(NavFormat.dateTime(record.createdAt)) 保存")
                                             .font(.system(size: 13))
                                             .foregroundStyle(Color(hex: "526F5D"))
                                         Spacer()
                                         Button {
                                             model.stores.deleteAltitudeRecord(id: record.id)
+                                            recordsVersion += 1   // 【Bug 行20】删除后立即刷新
                                         } label: {
                                             Image(systemName: "trash")
                                                 .font(.system(size: 15))

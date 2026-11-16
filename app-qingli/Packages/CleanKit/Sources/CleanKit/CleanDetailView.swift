@@ -95,11 +95,7 @@ public struct CleanDetailView: View {
                     .background(Color.white.opacity(0.96))
             }
         }
-        .alert("无法清理", isPresented: $cleanFailed) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text("未能完成删除。请在系统弹窗中允许删除，并在系统设置中允许完整访问相册后重试。")
-        }
+        // Bug表r27：删除被拒（点「不允许」）→ 静默留在当页，移除「无法清理」alert
     }
 
     // MARK: - 网格内容
@@ -284,19 +280,14 @@ public struct CleanDetailView: View {
             kind == .livePhotos ? CleanExecutor.shared.convertLiveToStatic : CleanExecutor.shared.clean
         work(targets) { r in
             cleaning = false
-            // Bug表R9-4：系统删除确认框点了「不允许」→ 事务回滚，全部失败时留在当页，
-            // 弹出失败提示；不进入清理成功页（否则用户误以为照片被删）。
-            if r.movedCount == 0 {
-                cleaning = false
-                cleanFailed = true
-                return
-            }
+            // Bug表r27：系统删除确认框点「不允许」→ 事务回滚，直接留在当页即可，
+            // 不再弹「无法清理」提示弹窗（用户主动拒绝，无需打扰）。
+            // 选中状态保留（回滚后资产仍在），用户可继续勾选或换别的清理。
+            guard r.movedCount > 0 else { return }
             result = r
             withAnimation(.easeInOut(duration: 0.25)) { showResult = true }
         }
     }
-
-    @State private var cleanFailed = false
 
     // MARK: - 成功页
 

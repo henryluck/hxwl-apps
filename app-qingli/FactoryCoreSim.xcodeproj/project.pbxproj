@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		03F95D922BCCE1C6917A6E2E /* ShellRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BDE25F687B854C8EE00FE58 /* ShellRootView.swift */; };
 		0E7A4D2A5141B3B8412C35A0 /* ProtoScreenCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D47A8AF25C1907A8B7C18430 /* ProtoScreenCaptureTests.swift */; };
+		10D6DD3C5EAF8A0CD54913B3 /* FourItemsVerifyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEA921401B03FF9BA10B8AB6 /* FourItemsVerifyTests.swift */; };
 		1674EA0332C005CB53FD9CA0 /* ScreenCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E5138E37BAE3FC94F88C4E7 /* ScreenCaptureTests.swift */; };
 		1FC2480DF2F1DA28FF4C0AD8 /* RepairSizeVerifyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F141B2E276228A6455AA11D6 /* RepairSizeVerifyTests.swift */; };
 		214983FA470B9FEF82CABCB7 /* CleanActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33FC9592A8552F9499C66922 /* CleanActivityAttributes.swift */; };
@@ -99,6 +100,7 @@
 		CC77974EEC26CD78CC89767F /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = assets; path = Resources/assets; sourceTree = SOURCE_ROOT; };
 		D47A8AF25C1907A8B7C18430 /* ProtoScreenCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtoScreenCaptureTests.swift; sourceTree = "<group>"; };
 		DD8953EBB0E69838A0981572 /* CleanKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CleanKit; path = Packages/CleanKit; sourceTree = SOURCE_ROOT; };
+		DEA921401B03FF9BA10B8AB6 /* FourItemsVerifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FourItemsVerifyTests.swift; sourceTree = "<group>"; };
 		EBB6671E394EE7C4CAD882A2 /* GateVerifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GateVerifyTests.swift; sourceTree = "<group>"; };
 		EC9E9A9F6E55FBE32B28C5BA /* FormatHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatHelper.swift; sourceTree = "<group>"; };
 		F141B2E276228A6455AA11D6 /* RepairSizeVerifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepairSizeVerifyTests.swift; sourceTree = "<group>"; };
@@ -125,6 +127,7 @@
 			isa = PBXGroup;
 			children = (
 				A0DE57DF2FEFC41A33E27867 /* FeatureFlowTests.swift */,
+				DEA921401B03FF9BA10B8AB6 /* FourItemsVerifyTests.swift */,
 				EBB6671E394EE7C4CAD882A2 /* GateVerifyTests.swift */,
 				D47A8AF25C1907A8B7C18430 /* ProtoScreenCaptureTests.swift */,
 				F141B2E276228A6455AA11D6 /* RepairSizeVerifyTests.swift */,
@@ -342,6 +345,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9B6DEA6F2355C36EACF7B40C /* FeatureFlowTests.swift in Sources */,
+				10D6DD3C5EAF8A0CD54913B3 /* FourItemsVerifyTests.swift in Sources */,
 				7AAAF54BBA483482C4A1C000 /* GateVerifyTests.swift in Sources */,
 				0E7A4D2A5141B3B8412C35A0 /* ProtoScreenCaptureTests.swift in Sources */,
 				1FC2480DF2F1DA28FF4C0AD8 /* RepairSizeVerifyTests.swift in Sources */,

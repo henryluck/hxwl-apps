@@ -429,10 +429,12 @@ struct NewbieRibbonLabel: View {
 // MARK: - 按钮动效（Bug表R2-2：缩放 + 光效）
 
 /// 主按钮呼吸光效：高光扫过 + 缩放脉动（用户要求：放大缩小更明显、扫光更亮更快）。
-struct ButtonPulseEffect: ViewModifier {
+/// r23：改为 public —— 首页「一键智能清理」按钮复用同款特效。
+public struct ButtonPulseEffect: ViewModifier {
     @State private var phase: Bool = false
 
-    func body(content: Content) -> some View {
+    public init() {}
+    public func body(content: Content) -> some View {
         content
             // 缩放幅度 1.015 → 1.03：脉动感更明显
             .scaleEffect(phase ? 1.03 : 1.0)

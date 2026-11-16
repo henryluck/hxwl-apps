@@ -349,22 +349,26 @@ struct WeatherScreen: View {
 
     // MARK: - 逐小时（免费仅现在，其余锁定；原型 gentle-hours）
 
-    /// 原型为 5 列均分网格（repeat(5, 1fr)，不滚动）：
-    /// 已订阅显示 前 5 个小时；未订阅「现在」可见，第 2~5 列模糊 + 「解锁会员」浮层。
+    /// 逐小时：横向滚动展示全部 24 小时（【Bug 行19】原来固定 5 列不可拖拽）。
+    /// 免费仅「现在」可见，其余 cell 模糊 + 「解锁会员」浮层；已订阅全部可看可滑。
     private func hourlyPane(_ snapshot: WeatherSnapshot) -> some View {
-        let hours = Array(snapshot.hours.prefix(5))
+        let hours = snapshot.hours
         let locked = !model.isUnlocked
-        // 注意：必须单层 HStack 平铺 5 个 cell 才能均分宽度（嵌套会把「现在」分到 1/2）
-        return HStack(alignment: .top, spacing: 0) {
-            if let first = hours.first {
-                hourCell(label: "现在", code: first.code, temp: first.temperature)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 0) {
+                if let first = hours.first {
+                    hourCell(label: "现在", code: first.code, temp: first.temperature)
+                        .frame(width: 72)
+                }
+                ForEach(Array(hours.dropFirst().enumerated()), id: \.element.id) { _, hour in
+                    hourCell(label: clockHour(hour.time), code: hour.code, temp: hour.temperature)
+                        .frame(width: 72)
+                        .blur(radius: locked ? 5 : 0)
+                        .opacity(locked ? 0.55 : 1)
+                        .allowsHitTesting(!locked)
+                }
             }
-            ForEach(Array(hours.dropFirst().enumerated()), id: \.element.id) { _, hour in
-                hourCell(label: clockHour(hour.time), code: hour.code, temp: hour.temperature)
-                    .blur(radius: locked ? 5 : 0)
-                    .opacity(locked ? 0.55 : 1)
-                    .allowsHitTesting(!locked)
-            }
+            .padding(.horizontal, 4)
         }
         .overlay { if locked { unlockOverlay } }
         .padding(.vertical, 26)
@@ -552,6 +556,49 @@ struct WeatherRegionPicker: View {
     @State private var alertMessage: String?
     @State private var locating = false
 
+    /// 【Bug 行18】热门城市内置列表：MapKit 对中国城市检索弱（模拟器尤甚），
+    /// 常出现搜索 0 结果导致"切换不了"。内置常见城市一键切换，不依赖任何网络检索。
+    private static let hotCities: [WeatherRegion] = [
+        WeatherRegion(id: "39.9042,116.4074|北京", name: "北京", district: "", province: "北京市", latitude: 39.9042, longitude: 116.4074),
+        WeatherRegion(id: "31.2304,121.4737|上海", name: "上海", district: "", province: "上海市", latitude: 31.2304, longitude: 121.4737),
+        WeatherRegion(id: "23.1291,113.2644|广州", name: "广州", district: "", province: "广东省", latitude: 23.1291, longitude: 113.2644),
+        WeatherRegion(id: "22.5431,114.0579|深圳", name: "深圳", district: "", province: "广东省", latitude: 22.5431, longitude: 114.0579),
+        WeatherRegion(id: "30.5728,104.0668|成都", name: "成都", district: "", province: "四川省", latitude: 30.5728, longitude: 104.0668),
+        WeatherRegion(id: "30.2741,120.1551|杭州", name: "杭州", district: "", province: "浙江省", latitude: 30.2741, longitude: 120.1551),
+        WeatherRegion(id: "32.0603,118.7969|南京", name: "南京", district: "", province: "江苏省", latitude: 32.0603, longitude: 118.7969),
+        WeatherRegion(id: "29.5630,106.5516|重庆", name: "重庆", district: "", province: "重庆市", latitude: 29.5630, longitude: 106.5516),
+        WeatherRegion(id: "34.3416,108.9398|西安", name: "西安", district: "", province: "陕西省", latitude: 34.3416, longitude: 108.9398),
+        WeatherRegion(id: "28.2282,112.9388|长沙", name: "长沙", district: "", province: "湖南省", latitude: 28.2282, longitude: 112.9388),
+        WeatherRegion(id: "23.0207,113.7518|东莞", name: "东莞", district: "", province: "广东省", latitude: 23.0207, longitude: 113.7518),
+        WeatherRegion(id: "24.4798,118.0894|厦门", name: "厦门", district: "", province: "福建省", latitude: 24.4798, longitude: 118.0894),
+        WeatherRegion(id: "36.0671,120.3826|青岛", name: "青岛", district: "", province: "山东省", latitude: 36.0671, longitude: 120.3826),
+        WeatherRegion(id: "30.9567,117.8547|黄山", name: "黄山", district: "", province: "安徽省", latitude: 30.9567, longitude: 117.8547),
+        WeatherRegion(id: "22.8170,108.3665|南宁", name: "南宁", district: "", province: "广西壮族自治区", latitude: 22.8170, longitude: 108.3665),
+        WeatherRegion(id: "25.0453,102.7097|昆明", name: "昆明", district: "", province: "云南省", latitude: 25.0453, longitude: 102.7097),
+        WeatherRegion(id: "36.6512,117.1201|济南", name: "济南", district: "", province: "山东省", latitude: 36.6512, longitude: 117.1201),
+        WeatherRegion(id: "45.8038,126.5349|哈尔滨", name: "哈尔滨", district: "", province: "黑龙江省", latitude: 45.8038, longitude: 126.5349),
+        WeatherRegion(id: "43.8171,125.3235|长春", name: "长春", district: "", province: "吉林省", latitude: 43.8171, longitude: 125.3235),
+        WeatherRegion(id: "41.8057,123.4315|沈阳", name: "沈阳", district: "", province: "辽宁省", latitude: 41.8057, longitude: 123.4315),
+        WeatherRegion(id: "38.0428,114.5149|石家庄", name: "石家庄", district: "", province: "河北省", latitude: 38.0428, longitude: 114.5149),
+        WeatherRegion(id: "37.8701,112.5489|太原", name: "太原", district: "", province: "山西省", latitude: 37.8701, longitude: 112.5489),
+        WeatherRegion(id: "34.7472,113.6249|郑州", name: "郑州", district: "", province: "河南省", latitude: 34.7472, longitude: 113.6249),
+        WeatherRegion(id: "30.5928,114.3055|武汉", name: "武汉", district: "", province: "湖北省", latitude: 30.5928, longitude: 114.3055),
+        WeatherRegion(id: "26.0865,119.2965|福州", name: "福州", district: "", province: "福建省", latitude: 26.0865, longitude: 119.2965),
+        WeatherRegion(id: "20.0444,110.1989|海口", name: "海口", district: "", province: "海南省", latitude: 20.0444, longitude: 110.1989),
+        WeatherRegion(id: "29.6503,91.1409|拉萨", name: "拉萨", district: "", province: "西藏自治区", latitude: 29.6503, longitude: 91.1409),
+        WeatherRegion(id: "36.6171,101.7782|西宁", name: "西宁", district: "", province: "青海省", latitude: 36.6171, longitude: 101.7782),
+        WeatherRegion(id: "38.4872,106.2309|银川", name: "银川", district: "", province: "宁夏回族自治区", latitude: 38.4872, longitude: 106.2309),
+        WeatherRegion(id: "43.7930,87.6271|乌鲁木齐", name: "乌鲁木齐", district: "", province: "新疆维吾尔自治区", latitude: 43.7930, longitude: 87.6271),
+        WeatherRegion(id: "40.8267,111.7434|呼和浩特", name: "呼和浩特", district: "", province: "内蒙古自治区", latitude: 40.8267, longitude: 111.7434),
+        WeatherRegion(id: "22.7699,108.3781|三亚", name: "三亚", district: "", province: "海南省", latitude: 18.2528, longitude: 109.5119),
+    ]
+
+    /// 输入先匹配内置城市（汉字/省份包含）
+    static func matchingBuiltInCities(_ text: String) -> [WeatherRegion] {
+        let t = text.lowercased()
+        return hotCities.filter { $0.name.lowercased().contains(t) || $0.province.contains(t) }
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -612,22 +659,57 @@ struct WeatherRegionPicker: View {
                             }
                         }
                     }
-                    Section(query.isEmpty ? "选择地区" : "搜索结果") {
-                        ForEach(results) { place in
-                            Button {
-                                model.stores.setWeatherRegion(
-                                    WeatherRegion(id: place.id,
-                                                  name: place.city.isEmpty ? place.name : place.city,
-                                                  district: place.district.isEmpty ? place.name : place.district,
-                                                  province: place.regionLabel,
-                                                  latitude: place.latitude,
-                                                  longitude: place.longitude))
-                                dismiss()
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(place.name).foregroundStyle(NavTheme.ink)
-                                    Text(place.subtitle).font(.system(size: 12)).foregroundStyle(NavTheme.inkMute)
+                    Section(query.isEmpty ? "热门城市" : "搜索结果") {
+                        if query.isEmpty {
+                            // 【Bug 行18】热门城市网格：一键切换，不依赖 MapKit
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
+                                      spacing: 10) {
+                                ForEach(Self.hotCities) { city in
+                                    Button {
+                                        selectRegion(city)
+                                    } label: {
+                                        Text(city.name)
+                                            .font(.system(size: 15))
+                                            .foregroundStyle(NavTheme.ink)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(NavTheme.bg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    }
+                                    .buttonStyle(.plain)
                                 }
+                            }
+                            .padding(.vertical, 4)
+                        } else {
+                            // 搜索结果 = 内置城市匹配 + MapKit 检索
+                            ForEach(builtInMatches) { city in
+                                Button {
+                                    selectRegion(city)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(city.name).foregroundStyle(NavTheme.ink)
+                                        Text(city.province).font(.system(size: 12)).foregroundStyle(NavTheme.inkMute)
+                                    }
+                                }
+                            }
+                            ForEach(results) { place in
+                                Button {
+                                    selectRegion(WeatherRegion(id: place.id,
+                                                               name: place.city.isEmpty ? place.name : place.city,
+                                                               district: place.district.isEmpty ? place.name : place.district,
+                                                               province: place.regionLabel,
+                                                               latitude: place.latitude,
+                                                               longitude: place.longitude))
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(place.name).foregroundStyle(NavTheme.ink)
+                                        Text(place.subtitle).font(.system(size: 12)).foregroundStyle(NavTheme.inkMute)
+                                    }
+                                }
+                            }
+                            if !searching && results.isEmpty && builtInMatches.isEmpty {
+                                Text("未找到相关地区，试试热门城市")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(NavTheme.inkMute)
                             }
                         }
                     }
@@ -651,6 +733,18 @@ struct WeatherRegionPicker: View {
                 Text(alertMessage ?? "")
             }
         }
+    }
+
+    /// 输入先匹配内置城市（汉字/省份包含），再合并 MapKit 结果
+    private var builtInMatches: [WeatherRegion] {
+        guard !query.isEmpty else { return [] }
+        return Self.matchingBuiltInCities(query)
+    }
+
+    /// 统一选择入口：写 stores → 关 sheet（onDismiss 触发主页刷新）
+    private func selectRegion(_ region: WeatherRegion) {
+        model.stores.setWeatherRegion(region)
+        dismiss()
     }
 
     private func search(_ text: String) {

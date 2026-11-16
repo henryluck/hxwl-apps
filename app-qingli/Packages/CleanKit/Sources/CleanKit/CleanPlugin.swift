@@ -2,9 +2,11 @@ import BaseComponents
 import Capabilities
 import CoreKit
 
+// Notification.Name.pluginSubpageDepth 已上移到 CoreKit（r22 个人中心二级页共用）
+// openSubscribedPage 仍在此处（仅 CleanKit 与壳层用）
 extension Notification.Name {
-    /// 插件二级页面深度变化（true=进入二级页，false=回根）——壳层据此隐藏/显示 TabBar
-    public static let pluginSubpageDepth = Notification.Name("pluginSubpageDepth")
+    /// 打开「已订阅页面」（ProtoSubscribedView）——首页已订阅会员入口用
+    public static let openSubscribedPage = Notification.Name("openSubscribedPage")
 }
 import SwiftUI
 
@@ -79,7 +81,8 @@ struct CleanHomeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             CleanHomeView(theme: context.theme,
-                          isPro: context.pay.isPro,
+                          // -uitest-pro 与订阅门同一开关：测试已订阅入口链路（真实状态仍以 pay.isPro 为准）
+                          isPro: context.pay.isPro || ProcessInfo.processInfo.arguments.contains("-uitest-pro"),
                           onDeepClean: { path.append(Route.scan) },
                           openAnalysis: { path.append(Route.analysis) },
                           openCategory: { kind in path.append(Route.detail(kind)) },
@@ -89,10 +92,9 @@ struct CleanHomeTab: View {
                                                               object: nil)
                           },
                           openSubscriptionManage: {
-                              // 需求3：已订阅入口 → App Store 订阅管理页
-                              if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
-                                  UIApplication.shared.open(url)
-                              }
+                              // Bug表r24（用户确认）：已订阅点右上角会员图标 → 打开「已订阅页面」
+                              // （ProtoSubscribedView，展示会员权益生效中 + 管理订阅入口）
+                              NotificationCenter.default.post(name: .openSubscribedPage, object: nil)
                           })
                 .navigationDestination(for: Route.self) { route in
                     destination(route)

@@ -110,6 +110,18 @@ public struct ProtoSettingsView: View {
                                    supportEmail: supportEmail ?? "")
                 }
             }
+            // Bug表r22：个人中心二级页面（意见反馈/关于我们）也要通知壳层隐藏 TabBar，
+            // 否则页面底部仍存在底部导航。机制与 CleanHomeTab.reportDepth 一致。
+            .onChange(of: path) { newPath in
+                NotificationCenter.default.post(name: .pluginSubpageDepth,
+                                                object: nil,
+                                                userInfo: ["depth": newPath.count > 0])
+            }
+            .onAppear {
+                NotificationCenter.default.post(name: .pluginSubpageDepth,
+                                                object: nil,
+                                                userInfo: ["depth": path.count > 0])
+            }
             .overlay(alignment: .top) {
                 if let toast {
                     Text(toast)

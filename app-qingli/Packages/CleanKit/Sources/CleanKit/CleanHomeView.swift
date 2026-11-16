@@ -1,3 +1,4 @@
+import BaseComponents
 import Capabilities
 import CoreKit
 import Photos
@@ -52,12 +53,20 @@ public struct CleanHomeView: View {
                     recommendSection
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                // Bug表r23：底部留白加大——自绘 TabBar 高 56pt+10pt，24pt 不够导致
+                // 最后一行推荐卡被 TabBar 遮挡、页面拉到底仍看不到完整卡片
+                .padding(.bottom, 96)
             }
         }
         .navigationBarHidden(true)
         .onAppear {
             storage = DeviceStorage.current()
+            // Bug表r26：返回首页时同步全局最新扫描结果——
+            // 详情页/扫描页更新过 CleanCenter.summary 后，首页推荐项要跟着刷新
+            // （原逻辑只在 summary==nil 时扫描，导致首页一直显示旧数据）
+            if let latest = CleanCenter.shared.summary, latest != summary {
+                summary = latest
+            }
             if summary == nil, !scanning {
                 startScan()
             }
@@ -207,6 +216,8 @@ public struct CleanHomeView: View {
                 showPhotoAuthAlert = true
             }
         }
+        // Bug表r23：「一键智能清理」按钮加缩放脉动特效（与订阅页主按钮一致）
+        .modifier(ButtonPulseEffect())
         .accessibilityIdentifier("home.primaryAction")
     }
 

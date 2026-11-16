@@ -1,8 +1,11 @@
+import AMapFoundationKit
+import AMapNaviKit
+import Combine
 import CoreKit
 import CoreLocation
 import Foundation
 
-/// 实时会话（NAV-37：一个活动会话，终态只写一次）
+/// 实时会话（对外形状保留：UI 依赖）
 public struct NavSession: Identifiable, Equatable {
     public let id: String
     public var mode: TravelMode
@@ -19,10 +22,11 @@ public struct NavSession: Identifiable, Equatable {
     public static func == (lhs: NavSession, rhs: NavSession) -> Bool { lhs.id == rhs.id }
 }
 
-/// 导航引擎：路径匹配、下一动作推进、偏航重算、到达/退出终态、旧回调隔离
+/// 导航引擎（高德导航 SDK 版）：算路/导航全部委托 NaviService（官方 Manager），
+/// 这里只维护会话状态机与 UI 绑定数据（phase/routes/剩余时距镜像官方 liveInfo）。
 @MainActor
 public final class NavEngine: ObservableObject {
-    // MARK: - 对外状态
+    // MARK: - 对外状态（保持既有 UI 契约）
 
     @Published public private(set) var phase: NavPhase = .idle
     @Published public private(set) var session: NavSession?
@@ -37,28 +41,59 @@ public final class NavEngine: ObservableObject {
     @Published public private(set) var isWeakLocation = false
     @Published public private(set) var lastFailure: NavFailure?
     @Published public private(set) var isBackgroundNavigating = false
-    /// 起步时间（用于统计与完成页）
     @Published public private(set) var traveledDistance: Double = 0
+
+    /// 当前诱导信息（官方 updateNaviInfo 镜像）
+    @Published public private(set) var liveInfo: LiveNaviInfo?
 
     public var voice: VoiceService
     private let location: LocationService
-    private let router = RouteService()
+    let navi = NaviService.shared
 
     private var requestCounter = 0
-    private var stepEndProgress: [Double] = []
-    private var routeLength: Double = 0
-    private var offRouteStreak = 0
-    private var lastFix: LocationSnapshot?
-    private var arrivalHandled = false
-    private var rerouteInFlight = false
     private var startInFlight = false
+    private var currentRequestId = ""
+    /// 当前会话是否用模拟导航（模拟器验证用；真机 GPS）
+    private var emulatorSession = false
 
     public init(location: LocationService, voice: VoiceService) {
         self.location = location
         self.voice = voice
+        navi.attachVoice(voice)
+        // 官方到达回调 → 引擎终态
+        navi.onArrived = { [weak self] in
+            self?.arrive()
+        }
+        // 官方实时诱导信息镜像（剩余时距/当前道路）
+        navi.$liveInfo
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] info in
+                guard let self, let info else { return }
+                self.liveInfo = info
+                self.remainingDistance = Double(info.remainDistance)
+                self.remainingTime = Double(info.remainTime)
+                self.distanceToManeuver = Double(info.segmentRemainDistance)
+            }
+            .store(in: &cancellables)
+        navi.$isRecalculating
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] recalculating in
+                guard let self, self.phase.isActiveSession else { return }
+                self.phase = recalculating ? .rerouting : .active
+            }
+            .store(in: &cancellables)
+        navi.$gpsSignal
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] signal in
+                // 官方信号强度：0 强 1 弱 2 无信号
+                self?.isWeakLocation = (signal == 2)
+            }
+            .store(in: &cancellables)
     }
 
-    // MARK: - 规划（路线方案页）
+    private var cancellables = Set<AnyCancellable>()
+
+    // MARK: - 规划（官方 calculateDriveRoute / calculateWalkRoute / calculateRideRoute）
 
     public func plan(origin: Place, destination: Place, mode: TravelMode) async {
         let requestId = nextRequestId()
@@ -66,20 +101,32 @@ public final class NavEngine: ObservableObject {
         lastFailure = nil
         routes = []
         selectedRouteId = nil
-        let result = await router.routes(from: origin, to: destination, mode: mode, requestId: requestId)
-        // 旧请求晚到：只接当前代次（NAV-37）
-        guard requestId == currentRequestId else { return }
-        if let failure = result.failure, result.routes.isEmpty {
+        Log.info("[Engine] plan 开始 req=\(requestId) mode=\(mode)（高德导航 SDK）")
+
+        let outcome = await navi.plan(from: origin, to: destination, mode: mode, requestId: requestId)
+
+        guard requestId == currentRequestId else {
+            Log.info("[Engine] 丢弃过期算路结果 req=\(requestId)")
+            return
+        }
+        if let failure = outcome.failure {
+            Log.warn("[Engine] 算路失败 → failed: \(failure)")
             phase = .failed(failure)
             lastFailure = failure
             return
         }
-        routes = result.routes
-        selectedRouteId = result.routes.first?.id
+        // 从官方 manager 的 naviRoutes 取回方案（多策略驾车可达 3 条）
+        let options = navi.currentRoutes(mode: mode, requestId: requestId)
+        guard !options.isEmpty else {
+            phase = .failed(.noRoute)
+            lastFailure = .noRoute
+            return
+        }
+        routes = options
+        selectedRouteId = options.first?.id
         phase = .ready
+        Log.info("[Engine] 算路成功 \(options.count) 条方案（高德导航 SDK）")
     }
-
-    private var currentRequestId = ""
 
     private func nextRequestId() -> String {
         requestCounter += 1
@@ -91,9 +138,14 @@ public final class NavEngine: ObservableObject {
     public func selectRoute(_ id: String) {
         guard routes.contains(where: { $0.id == id }) else { return }
         selectedRouteId = id
+        // 官方：切方案后重新选择路线（导航 SDK 内部路线组，routeID 从 1 递增）
+        if let routeIndex = routes.firstIndex(where: { $0.id == id }),
+           navi.viewKind == .drive {
+            _ = AMapNaviDriveManager.sharedInstance().selectNaviRoute(withRouteID: routeIndex + 1)
+        }
     }
 
-    /// 规划前置条件不满足（无有效起点/定位不可用）时直接进入对应失败态
+    /// 规划前置条件不满足时直接进入失败态
     public func fail(_ failure: NavFailure) {
         routes = []
         selectedRouteId = nil
@@ -105,24 +157,12 @@ public final class NavEngine: ObservableObject {
         routes.first { $0.id == selectedRouteId }
     }
 
-    // MARK: - 开始（NAV-19/20：内部再次核验，单会话防连点）
+    // MARK: - 开始导航（官方 startGPSNavi / 模拟器 startEmulatorNavi）
 
     public enum StartFailure: Error {
         case location(NavFailure)
         case noRoute
         case alreadyActive
-    }
-
-    /// 单次定位拿起点：优先复用新鲜快照（ indoor/弱 GPS 不再必然失败），失败按真实原因分流
-    private func originFix() async throws -> LocationSnapshot {
-        if let fix = await location.requestSingleFix(), fix.isUsable {
-            return fix
-        }
-        // 定位不可用还要看是不是权限问题，提示与修复动作完全不同（失败分流表）
-        if !location.authState.isUsable {
-            throw StartFailure.location(location.authState == .servicesOff ? .locationServicesOff : .locationDenied)
-        }
-        throw StartFailure.location(.locationUnavailable)
     }
 
     public func start(origin: Place, destination: Place) async throws {
@@ -133,246 +173,68 @@ public final class NavEngine: ObservableObject {
         phase = .starting
         defer { startInFlight = false }
 
-        // 实时导航必须从设备真实位置起步（NAV-19 不可瞬移）：
-        // 手选远起点、或设备起点在规划后已位移超过 120m → 用当前位置重算
-        let fix = try await originFix()
-        let devicePlace = fix.place
-        var startOrigin = origin
-        if origin.distance(to: devicePlace) > 120 {
-            let requestId = nextRequestId()
-            let result = await router.routes(from: devicePlace, to: destination,
-                                             mode: route.mode, requestId: requestId)
-            guard requestId == currentRequestId, let fresh = result.routes.first else {
+        // 实时导航必须从设备真实位置起步；位置不可用直接失败分流
+        guard let fix = await location.requestSingleFix(), fix.isUsable else {
+            if !location.authState.isUsable {
                 phase = .ready
-                // 算路失败按真实原因透传（offline/serviceError 等），不再笼统报「无法获取位置」
-                throw result.failure.map(StartFailure.location) ?? StartFailure.noRoute
+                throw StartFailure.location(location.authState == .servicesOff ? .locationServicesOff : .locationDenied)
             }
-            routes = result.routes
-            selectedRouteId = fresh.id
-            startOrigin = devicePlace
-        } else {
-            startOrigin = devicePlace
-        }
-
-        guard let finalRoute = selectedRoute else {
             phase = .ready
-            throw StartFailure.noRoute
+            throw StartFailure.location(.locationUnavailable)
         }
 
-        beginSession(route: finalRoute, origin: startOrigin, destination: destination)
+        beginSession(route: route, origin: fix.place, destination: destination)
     }
 
     private func beginSession(route: RouteOption, origin: Place, destination: Place) {
         let id = "sess-\(Int(Date().timeIntervalSince1970))-\(requestCounter)"
-        let newSession = NavSession(id: id, mode: route.mode, destination: destination,
-                                    origin: origin, route: route, startedAt: Date(),
-                                    terminalReason: nil)
-        session = newSession
-        arrivalHandled = false
-        offRouteStreak = 0
-        traveledDistance = 0
-        rerouteInFlight = false
-        currentStepIndex = 0
-        prepareRouteMetrics(route)
-        phase = .active
-        isFollowing = true
+        session = NavSession(id: id, mode: route.mode, destination: destination,
+                             origin: origin, route: route, startedAt: Date(),
+                             terminalReason: nil)
         voice.resetSessionKeys()
+        traveledDistance = 0
+        isFollowing = true
 
-        // 起步播报：路线概要 + 首条有效动作（V01）
-        let summary = "开始导航，全程\(route.distanceText)，预计\(route.timeText)"
-        let firstAction = route.steps.first?.instruction ?? ""
-        voice.speak(summary + (firstAction.isEmpty ? "" : "。") + firstAction, priority: .turn)
+        // 模拟器无真实位移 → 模拟导航（官方明确模拟导航勿作实际导航展示；
+        // 这里仅用于开发验证 UI 链路，真机自动走 GPS 导航）
+        #if targetEnvironment(simulator)
+        emulatorSession = true
+        #else
+        emulatorSession = false
+        #endif
 
-        location.startContinuous { [weak self] fix in
-            self?.handle(fix: fix)
-        }
-    }
-
-    private func prepareRouteMetrics(_ route: RouteOption) {
-        routeLength = Geo.length(of: route.polyline)
-        var cumulative = 0.0
-        stepEndProgress = route.steps.map { step in
-            cumulative += step.distance
-            return cumulative
-        }
-        remainingDistance = route.distance
-        remainingTime = route.expectedTravelTime
-        distanceToManeuver = route.steps.first?.distance ?? 0
-    }
-
-    // MARK: - 位置处理（NAV-22/23/25/26）
-
-    private func handle(fix: LocationSnapshot) {
-        guard phase.isActiveSession, var current = session else { return }
-        lastFix = fix
-
-        // 弱定位/过期不编确定转向
-        if !fix.isUsable {
-            if !isWeakLocation {
-                isWeakLocation = true
-                voice.announceOnce(key: "weak-\(current.id)", text: "定位信号较弱，正在重新获取")
-            }
+        let ok = navi.startNavi(emulator: emulatorSession)
+        guard ok else {
+            phase = .failed(.engineStartFailed)
+            lastFailure = .engineStartFailed
+            session = nil
             return
         }
-        if isWeakLocation {
-            isWeakLocation = false
-            voice.announceOnce(key: "weak-recovered-\(current.id)", text: "定位已恢复")
-        }
-
-        let match = Geo.match(fix.place.gcj02Coordinate, on: current.route.polyline)
-        offRouteDistance = match.offRouteDistance
-
-        // 剩余里程/时间按当前路线更新（NAV-23）
-        remainingDistance = max(0, routeLength - match.progress)
-        let ratio = routeLength > 0 ? remainingDistance / routeLength : 1
-        remainingTime = current.route.expectedTravelTime * ratio
-        traveledDistance = min(match.progress, routeLength)
-
-        // 步骤推进
-        advanceStepIfNeeded(progress: match.progress, fix: fix)
-        updateManeuverDistance(progress: match.progress)
-
-        // 到达判定（引擎能力范围内的真实到达）
-        if !arrivalHandled {
-            let toDestination = Geo.distance(fix.place.gcj02Coordinate,
-                                             current.destination.gcj02Coordinate)
-            if toDestination <= current.mode.arrivalRadius ||
-                (currentStepIndex >= current.route.steps.count - 1 &&
-                 remainingDistance <= current.mode.arrivalRadius) {
-                arrive()
-                return
-            }
-        }
-
-        // 偏航判定：连续 3 次超阈值才确认（避免 GPS 漂移误判，NAV-25）
-        if offRouteDistance > current.mode.offRouteThreshold {
-            offRouteStreak += 1
-            if offRouteStreak >= 3 && !rerouteInFlight {
-                triggerReroute()
-            }
-        } else {
-            offRouteStreak = 0
-        }
-    }
-
-    private func advanceStepIfNeeded(progress: Double, fix: LocationSnapshot) {
-        guard let current = session else { return }
-        var index = currentStepIndex
-        // 走过当前机动点：推进到下一有效动作
-        while index < current.route.steps.count - 1,
-              progress >= stepEndProgress[index] - 8 {
-            index += 1
-        }
-        if index != currentStepIndex {
-            currentStepIndex = index
-            let step = current.route.steps[index]
-            if !step.instruction.isEmpty {
-                voice.announceOnce(key: "\(current.id)-step-\(index)-now",
-                                   text: step.instruction, priority: .turn)
-            }
-        }
-    }
-
-    private func updateManeuverDistance(progress: Double) {
-        guard let current = session, currentStepIndex < stepEndProgress.count else { return }
-        let remain = max(0, stepEndProgress[currentStepIndex] - progress)
-        distanceToManeuver = remain
-
-        // 分档播报，每档只播一次（NAV-28 / V02）
-        guard let step = current.route.steps[safe: currentStepIndex],
-              !step.instruction.isEmpty else { return }
-        for threshold in current.mode.announceDistances where remain <= threshold {
-            let key = "\(current.id)-step-\(currentStepIndex)-\(Int(threshold))"
-            if remain > 0 {
-                voice.announceOnce(key: key,
-                                   text: "前方\(Int(threshold))米，\(step.instruction)",
-                                   priority: .turn)
-            }
-        }
-    }
-
-    // MARK: - 偏航重算（NAV-25）
-
-    private func triggerReroute() {
-        guard let current = session, let fix = lastFix, !rerouteInFlight else { return }
-        rerouteInFlight = true
-        phase = .rerouting
-        voice.announceOnce(key: "reroute-\(current.id)-\(Int(Date().timeIntervalSince1970))",
-                           text: "已偏离路线，正在重新规划", priority: .turn)
-
-        Task { [weak self] in
-            guard let self else { return }
-            let requestId = self.nextRequestId()
-            let from = fix.place
-            let result = await self.router.routes(from: from, to: current.destination,
-                                                  mode: current.mode, requestId: requestId)
-            await MainActor.run {
-                guard self.phase == .rerouting || self.phase == .active else {
-                    self.rerouteInFlight = false
-                    return
-                }
-                // 终态已写则丢弃迟到结果（NAV-37）
-                guard var session = self.session, session.id == current.id else {
-                    self.rerouteInFlight = false
-                    return
-                }
-                if let fresh = result.routes.first, result.failure == nil {
-                    session.route = fresh
-                    self.session = session
-                    self.routes = [fresh]
-                    self.selectedRouteId = fresh.id
-                    self.currentStepIndex = 0
-                    self.prepareRouteMetrics(fresh)
-                    self.offRouteStreak = 0
-                    self.phase = .active
-                    self.voice.announceOnce(key: "reroute-ok-\(session.id)-\(Int(Date().timeIntervalSince1970))",
-                                            text: "路线已更新。" + (fresh.steps.first?.instruction ?? ""),
-                                            priority: .turn)
-                } else {
-                    self.phase = .active
-                    self.lastFailure = result.failure ?? .serviceError
-                    self.voice.announceOnce(key: "reroute-fail-\(session.id)-\(Int(Date().timeIntervalSince1970))",
-                                            text: "重新规划失败，请检查网络后重试", priority: .turn)
-                }
-                self.rerouteInFlight = false
-            }
-        }
-    }
-
-    /// 用户手动重试重算（失败后）
-    public func retryReroute() {
-        offRouteStreak = 3
-        triggerReroute()
+        phase = .active
+        let summary = "开始导航，全程\(route.distanceText)，预计\(route.timeText)"
+        voice.speak(summary, priority: .normal)
+        Log.info("[Engine] 导航会话开始 id=\(id) emulator=\(emulatorSession)")
     }
 
     // MARK: - 终态
 
     public func arrive() {
-        guard phase.isActiveSession, var current = session, !arrivalHandled else { return }
-        arrivalHandled = true
+        guard phase.isActiveSession, var current = session else { return }
         current.terminalReason = .arrived
         session = current
         phase = .arrived
         voice.speak("已到达目的地，导航结束", priority: .terminal)
-        teardownSession()
+        navi.stopNavi()
     }
 
-    /// 主动退出：回路线规划（覆盖旧版直接回首页，NAV-34）
+    /// 主动退出：回路线规划（NAV-34）
     public func exit() {
         guard phase.isActiveSession, var current = session else { return }
         current.terminalReason = .exited
         session = current
         phase = .ended
         voice.speak("导航已结束", priority: .terminal)
-        teardownSession()
-    }
-
-    private func teardownSession() {
-        location.stopContinuous()
-        offRouteStreak = 0
-        rerouteInFlight = false
-        isBackgroundNavigating = false
-        isFollowing = true
+        navi.stopNavi()
     }
 
     /// 回到规划态：保留目标/方式/路线选择意图（NAV-34）
@@ -382,9 +244,14 @@ public final class NavEngine: ObservableObject {
         }
     }
 
-    /// 页面销毁不等于结束会话；这里只标记 UI 可见性（NAV-39）
+    /// 页面销毁不等于结束会话；只标记 UI 可见性（NAV-39）
     public func setFollowing(_ following: Bool) {
         isFollowing = following
+        if following {
+            navi.lockCamera()
+        } else {
+            navi.displayOverview()
+        }
     }
 
     // MARK: - 前后台（NAV-31）
@@ -392,19 +259,9 @@ public final class NavEngine: ObservableObject {
     public func handleScenePhase(_ isBackground: Bool) {
         guard phase.isActiveSession else { return }
         if isBackground {
-            if location.isContinuous {
-                isBackgroundNavigating = true
-                if let id = session?.id {
-                    voice.announceOnce(key: "bg-\(id)", text: "地图持续为您导航中", priority: .normal)
-                }
-            }
+            isBackgroundNavigating = true
         } else {
             isBackgroundNavigating = false
-            // 回前台：不重播导航开始，只按当前有效动作恢复（V11/V15）
-            if let step = session?.route.steps[safe: currentStepIndex],
-               !step.instruction.isEmpty, distanceToManeuver > 0 {
-                voice.speak("继续\(step.instruction)", priority: .turn)
-            }
         }
     }
 
@@ -415,20 +272,79 @@ public final class NavEngine: ObservableObject {
             session = nil
             routes = []
             selectedRouteId = nil
+            navi.stopNavi()
         }
     }
 
     public var nextStep: NavStep? {
+        // 官方导航中转向提示从 liveInfo 走；保留 API 兼容（非导航场景用 steps）
         session?.route.steps[safe: currentStepIndex]
     }
 
     public var nextRoadName: String? {
-        guard let step = nextStep, !step.roadName.isEmpty else { return nil }
-        return step.roadName
+        guard let name = liveInfo?.nextRoadName, !name.isEmpty else { return nil }
+        return name
     }
 
     public var etaDate: Date {
         Date().addingTimeInterval(remainingTime)
+    }
+
+    /// 诱导图标类型（官方 AMapNaviIconType 原始值 → SF Symbol）
+    public var maneuverIconName: String {
+        let t = liveInfo?.iconType ?? -1
+        // AMapNaviIconType：1 左转 2 右转 3 直行 4 左前方 5 右前方 6 左后方 7 右后方
+        // 8 左转掉头 9 直行掉头 10 右转掉头 11 靠左 12 靠右 ...
+        switch t {
+        case 1: return "arrow.turn.up.left"
+        case 2: return "arrow.turn.up.right"
+        case 4: return "arrow.up.left"
+        case 5: return "arrow.up.right"
+        case 6: return "arrow.down.left"
+        case 7: return "arrow.down.right"
+        case 8: return "arrow.uturn.left"
+        case 10: return "arrow.uturn.right"
+        case 11: return "arrow.up.left.to.line"
+        case 12: return "arrow.up.right.to.line"
+        default: return "arrow.up"
+        }
+    }
+
+    /// 诱导文字（官方 iconType → 中文动作 + 下一道路名）
+    public var maneuverText: String {
+        guard let info = liveInfo else { return "沿当前道路继续前行" }
+        let action = Self.iconActionText(info.iconType)
+        if !info.nextRoadName.isEmpty {
+            return "\(action)进入\(info.nextRoadName)"
+        }
+        return action
+    }
+
+    static func iconActionText(_ type: Int) -> String {
+        switch type {
+        case 1: return "左转"
+        case 2: return "右转"
+        case 3: return "直行"
+        case 4: return "向左前方行驶"
+        case 5: return "向右前方行驶"
+        case 6: return "向左后方行驶"
+        case 7: return "向右后方行驶"
+        case 8: return "左转掉头"
+        case 9: return "直行掉头"
+        case 10: return "右转掉头"
+        case 11: return "靠左行驶"
+        case 12: return "靠右行驶"
+        case 13: return "进入环岛"
+        case 14: return "通过环岛"
+        case 15: return "驶出环岛"
+        case 16: return "到达目的地"
+        case 17: return "到达途经点"
+        case 20: return "进入匝道"
+        case 21: return "驶出匝道"
+        case 22: return "通过人行横道"
+        case 23: return "通过收费站"
+        default: return "继续前行"
+        }
     }
 }
 

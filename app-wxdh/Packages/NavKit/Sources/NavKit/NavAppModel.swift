@@ -1,4 +1,5 @@
 import Capabilities
+import Combine
 import CoreLocation
 import CoreKit
 import Foundation
@@ -125,7 +126,19 @@ public final class NavAppModel: ObservableObject {
         let voice = VoiceService()
         self.voice = voice
         self.engine = NavEngine(location: location, voice: voice)
+        // 【Bug：页面刷新失效】engine/location 等子服务是 ObservableObject，但视图只
+        // ObservedObject model —— 子服务的 @Published 变化（engine.phase planning→failed、
+        // location.snapshot 等）不会触发 model 的 objectWillChange，规划页永远显示
+        // 「正在规划…」。把子服务的变更转发到 model 的 objectWillChange（AVL 树顺序无关）。
+        for publisher in [engine.objectWillChange, location.objectWillChange] {
+            publisher
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.objectWillChange.send() }
+                .store(in: &childCancellables)
+        }
     }
+
+    private var childCancellables: Set<AnyCancellable> = []
 
     // MARK: - 会员
 
@@ -333,11 +346,18 @@ public final class NavAppModel: ObservableObject {
 
     public func openPlan() {
         flow = .plan
-        Task { await plan() }
+        // plan() 由 RoutePlanView.task 在页面挂载时触发（此处不再并发触发，
+        // 避免同一目的地瞬间打出两个高德规划请求互相覆盖）
     }
+
+    /// 规划在途标记：并发调用 plan()（openPlan/页面 task/重试）时只放行第一个
+    private var planInFlight = false
 
     public func plan() async {
         guard let destination else { return }
+        guard !planInFlight else { return }   // 在途不重入（模式切换/重试会在上一轮结束后再发）
+        planInFlight = true
+        defer { planInFlight = false }
         // 起点优先用户手选；否则用当前有效位置（无新鲜缓存时取一次真实定位，不拿 0,0 算路）
         var originPlace = origin
         // 【Bug 行15】规划时若定位权限仍未决定，先请求并等待授权结果（不再固定 sleep
@@ -354,9 +374,11 @@ public final class NavAppModel: ObservableObject {
             originPlace = fix.place
         }
         guard let originPlace, originPlace.hasValidCoordinate else {
+            Log.warn("[Plan] 起点不可用 auth=\(location.authState)")
             engine.fail(location.authState.isUsable ? .locationUnavailable : .locationDenied)
             return
         }
+        Log.info("[Plan] 开始算路 origin=\(originPlace.name) dest=\(destination.name) mode=\(mode)")
         // 【Bug 行16】起终点一致（名称相同且坐标几乎重合）不发起算路，直接给失败态提示。
         // MKDirections 对重合起终点会返回 directionsNotFound（笼统"无路线"），这里提前拦截
         // 并给出可理解的提示文案。
@@ -399,12 +421,7 @@ public final class NavAppModel: ObservableObject {
                                                                   latitude: 0, longitude: 0),
                                    destination: destination)
             flow = .navigating
-            if let route = engine.selectedRoute {
-                mapController.showRoute(route.polyline, origin: originDisplay, destination: destination)
-            }
-            if let snap = location.snapshot {
-                mapController.follow(snap.place.gcj02Coordinate, heading: snap.course >= 0 ? snap.course : nil)
-            }
+            // 官方导航视图接管地图；无需手动画线/跟随
             return nil
         } catch NavEngine.StartFailure.location(let failure) {
             return failure
@@ -546,6 +563,18 @@ public final class NavAppModel: ObservableObject {
             destination = Place(id: "debug", name: "广州塔", address: "海珠区阅江西路222号",
                                 city: "广州市", district: "海珠区",
                                 latitude: 23.1066, longitude: 113.3245)
+            openPlan()
+        case "plan-walk":
+            destination = Place(id: "debug", name: "广州塔", address: "海珠区阅江西路222号",
+                                city: "广州市", district: "海珠区",
+                                latitude: 23.1066, longitude: 113.3245)
+            mode = .walking
+            openPlan()
+        case "plan-ride":
+            destination = Place(id: "debug", name: "广州塔", address: "海珠区阅江西路222号",
+                                city: "广州市", district: "海珠区",
+                                latitude: 23.1066, longitude: 113.3245)
+            mode = .cycling
             openPlan()
         case "navigating":
             destination = Place(id: "debug", name: "广州塔", address: "海珠区阅江西路222号",

@@ -26,11 +26,26 @@ targets:
       - path: Resources/assets
         type: folder
       - path: Resources/Assets.xcassets
+      # 高德 SDK 资源包（静态 xcframework 的 bundle 不会自动拷入 App，需显式加入 resources；
+      # 否则 NSBundle(url: nil) 启动崩溃。MAMapKit 与 AMapNaviKit 各带一个同名 AMap.bundle
+      # （内容几乎一致，NaviKit 版多 offline 目录）→ 取 NaviKit 版拷贝到 Vendor/AMap/Resources
+      # 作为唯一源，避免 Multiple commands produce 冲突）
+      - path: Vendor/AMap/Resources/AMap.bundle
+      - path: Vendor/AMap/Resources/AMapNavi.bundle
     dependencies:
       - package: CoreKit
       - package: Capabilities
       - package: BaseComponents
       - package: NavKit
+      # 高德 iOS SDK（静态 xcframework：ios-arm64 设备切片 + arm64/x86_64 模拟器切片）
+      - framework: Vendor/AMap/AMapFoundationKit.xcframework
+        embed: false
+      - framework: Vendor/AMap/MAMapKit.xcframework
+        embed: false
+      - framework: Vendor/AMap/AMapNaviKit.xcframework
+        embed: false
+      - framework: Vendor/AMap/AMapSearchKit.xcframework
+        embed: false
     info:
       path: FactoryCore-Info.plist
       properties:
@@ -51,6 +66,9 @@ targets:
           - location
           - audio
         NSSupportsLiveActivities: true
+        # 高德 SDK 部分接口走 HTTP（官方入门指南要求 ATS 放行），否则 SDK 静默失败
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     settings:
       base:
         SWIFT_OPTIMIZATION_LEVEL: '-Osize'

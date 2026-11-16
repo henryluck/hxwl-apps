@@ -123,16 +123,21 @@ struct AssetMedia: View {
 public struct SplashView: View {
     let image: String
     let theme: any ThemeService
+    /// 【Bug 行24】图→视频切换的水平位移补偿：视频层呈现与 PNG 解码路径存在细微
+    /// 取整差异，用户实测画面向左跳。给静态图加 x 偏移对齐视频实际呈现位置。
+    var offsetX: CGFloat = 0
 
-    public init(image: String, theme: any ThemeService) {
+    public init(image: String, theme: any ThemeService, offsetX: CGFloat = 0) {
         self.image = image
         self.theme = theme
+        self.offsetX = offsetX
     }
 
     public var body: some View {
         ZStack {
             AssetImage(path: image)
                 .ignoresSafeArea()
+                .offset(x: offsetX)
         }
         .background(theme.colors.bgPage)
     }

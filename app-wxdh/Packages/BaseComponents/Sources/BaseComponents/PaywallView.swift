@@ -185,13 +185,23 @@ public struct PaywallView: View {
     public init(config: PaywallConfig, variant: PaywallVariant = .unlock,
                 theme: any ThemeService, pay: any PayService,
                 analytics: (any AnalyticsService)? = nil,
-                onClose: (() -> Void)? = nil) {
+                onClose: (() -> Void)? = nil,
+                preferredPlan: PaywallPlan? = nil) {
         self.config = config
         self.variant = variant
         self.theme = theme
         self.pay = pay
         self.analytics = analytics
         self.onClose = onClose
+        // 选中优先级：调用方指定（会员入口=终身）> spec defaultPlan > 周方案兜底。
+        // 指定方案未启用（如终身未配商品）时自然回退周方案。
+        if let preferredPlan {
+            let usable = preferredPlan == .lifetime
+                ? config.lifetimeEnabled && !config.lifetimeProductID.isEmpty
+                : true
+            _plan = State(initialValue: usable ? preferredPlan : .weekly)
+            return
+        }
         // 需求 03/A02：解锁场景默认选中周方案（终身为可选项）；未配终身商品时自然回退周方案
         let wantsLifetime = config.defaultPlan == "lifetime"
             && config.lifetimeEnabled && !config.lifetimeProductID.isEmpty

@@ -1,4 +1,5 @@
 import Capabilities
+import CoreKit
 import CoreLocation
 import Foundation
 import SwiftUI
@@ -361,7 +362,14 @@ struct AccountMemberCapsule: View {
                 .padding(.horizontal, 6)
 
             Button {
-                _ = model.requireMembership()
+                // 【会员入口】未订阅 → 弹订阅页（解锁场景，终身默认选中）；
+                // 已订阅 → 弹「会员权益已生效」卡（同一订阅页的 active 形态，宿主 isPro 短路呈现）。
+                // source=memberEntry 让宿主区分于普通功能拦截（后者默认周方案）。
+                // 【Bug 行22】加日志：验证点击是否到达按钮、通知是否发出（排查"无响应"断点）
+                Log.warn("[MemberEntry] 会员按钮点击，发出 presentPaywall 通知")
+                NotificationCenter.default.post(name: .presentPaywall,
+                                                object: nil,
+                                                userInfo: ["source": "memberEntry"])
             } label: {
                 HStack(spacing: 5) {
                     // 金色渐变皇冠（原型为独立金 SVG：#F9B950 主体 + 高光 #FFE29C）

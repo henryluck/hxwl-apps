@@ -63,6 +63,8 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
     /// 首期资格三态。默认 unknown：商品/资格尚未确认前不按新人展示首期价
     /// （需求 03：权益或资格 unknown → 核验/恢复/重试，不按新人）。
     @Published public private(set) var introOfferState: IntroOfferState = .unknown
+    /// DEBUG: PAY_DEBUG_PRO=1 视作已订阅（验证「会员权益已生效」卡/已订阅形态，仅 DEBUG）。
+    private let debugPro: Bool
     /// 是否有订阅历史（含已到期未续）。refreshEntitlement 时由本地已验证交易计算
     /// （Transaction.latest 不受是否到期影响，比沙盒 isEligibleForIntroOffer 可靠）。
     @Published public private(set) var hasSubscriptionHistory = false
@@ -142,6 +144,11 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
         self.weeklyProductIDs = weeklyProductIDs
         self.legacyProductIDs = legacyProductIDs
         self.activeWeeklyProductID = productID
+        #if DEBUG
+        self.debugPro = ProcessInfo.processInfo.environment["PAY_DEBUG_PRO"] == "1"
+        #else
+        self.debugPro = false
+        #endif
         super.init()
         // 中台商品列表：建立 commodityId ↔ iosProductId 映射（下单用；失败静默降级为无订单购买）
         if let verifier = iapVerifier {
@@ -398,8 +405,8 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
                 if transaction.productID == lifetimeProductID { lifetime = true }
             }
         }
-        ownsLifetime = lifetime
-        isPro = pro
+        ownsLifetime = lifetime || debugPro
+        isPro = pro || debugPro
         // 购买/恢复/退订后资格会变化，随权益刷新一并重查（商品未就绪时静默跳过）
         await refreshIntroEligibility()
     }

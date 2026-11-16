@@ -17,6 +17,8 @@ struct ShellRootView: View {
     /// 订阅页场景变体：功能拦截 / 我的-会员卡 → 解锁场景（场景 02/04，周+终身双框）；
     /// 引导末页由 OnboardingFlow 自带启动场景（场景 01/03，只有价格行）
     @State private var paywallVariant: PaywallVariant = .unlock
+    /// 调用方指定的默认选中方案（nil=按 spec defaultPlan；会员入口传 .lifetime）
+    @State private var paywallPreferredPlan: PaywallPlan?
     @State private var showRetention = false       // 挽留诱导页（订阅页关闭后弹）
     @State private var didTriggerPaywall = false   // 防重入：本次启动只触发一次订阅页
     @State private var entitlementReady = false    // isPro 查询完成（启动时等 StoreKit）
@@ -79,6 +81,11 @@ struct ShellRootView: View {
                 if ProcessInfo.processInfo.environment["PAY_DEBUG_VARIANT"] == "startup" {
                     paywallVariant = .startup
                 }
+                // PAY_DEBUG_MEMBER_ENTRY=1 走「会员入口」路径：终身默认选中
+                //（验证页头会员按钮行为；配合 PAY_DEBUG_UNLOCKED=1 验已订阅形态）
+                if ProcessInfo.processInfo.environment["PAY_DEBUG_MEMBER_ENTRY"] == "1" {
+                    paywallPreferredPlan = .lifetime
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showPaywall = true }
             }
             #endif
@@ -125,11 +132,22 @@ struct ShellRootView: View {
                 selectedTab = target
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .presentPaywall)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .presentPaywall)) { note in
             // 插件内会员拦截统一弹宿主订阅页（价格/商品只在此处）
-            // 拦截场景一律走解锁场景（场景 02/04：四卖点 + 周/终身双框，默认周）
+            // 拦截场景一律走解锁场景（场景 02/04：四卖点 + 周/终身双框，默认周）。
+            // 【会员入口】页头「会员」按钮带 preferredPlan=lifetime：未订阅 → 终身默认选中；
+            // 已订阅 → PaywallView 自动呈现「会员权益已生效」卡（同一页面两种形态）。
+            // 【Bug 行22】日志定位"会员按钮无响应"：确认宿主是否收到通知、走了哪个分支
+            let fromMemberEntry = (note.userInfo?["source"] as? String) == "memberEntry"
+            Log.warn("[Paywall] 收到 presentPaywall 通知 memberEntry=\(fromMemberEntry) isPro=\(capabilities.pay.isPro)")
             if !capabilities.pay.isPro {
                 paywallVariant = .unlock
+                paywallPreferredPlan = fromMemberEntry ? .lifetime : nil
+                DispatchQueue.main.async { showPaywall = true }
+            } else if fromMemberEntry {
+                // 已订阅点「会员」：打开已订阅页面（会员权益已生效卡）
+                paywallVariant = .unlock
+                paywallPreferredPlan = nil
                 DispatchQueue.main.async { showPaywall = true }
             }
         }
@@ -153,7 +171,8 @@ struct ShellRootView: View {
                         variant: paywallVariant,
                         theme: capabilities.theme,
                         pay: capabilities.pay,
-                        analytics: capabilities.analytics)
+                        analytics: capabilities.analytics,
+                        preferredPlan: paywallPreferredPlan)
         }
         .onChange(of: showPaywall) { shown in
             // 订阅页关闭：已订阅直接进主界面；否则按 retention 配置决定是否弹诱导页（已购挽留不再弹）

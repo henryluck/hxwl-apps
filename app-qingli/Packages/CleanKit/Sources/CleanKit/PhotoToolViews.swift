@@ -163,7 +163,8 @@ struct ToolHeroImage: View {
                     .padding(.bottom, 10)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: 340, height: 456, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
@@ -608,11 +609,16 @@ public struct PhotoRepairView: View {
             CleanPalette.pageBackground.ignoresSafeArea()
             VStack(spacing: 0) {
                 ToolNavBar(title: "修复图片", onBack: { dismiss() }) { EmptyView() }
-                Spacer(minLength: 0)
+                // Bug表r29/r30：图片区固定从导航栏下方开始（上侧固定间距替代 Spacer——
+                // 原两侧 Spacer 均分布局会随底部按钮区高度变化浮动图片位置）
                 content
+                    .padding(.top, 14)
                 Spacer(minLength: 0)
+                // 需求1：底部按钮区固定高度，示例态/选后态按钮位置完全一致（268pt 区域内底部对齐）
                 bottomButton
-                    .padding(.bottom, 72)
+                    .frame(height: 140)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 30)
             }
         }
         .navigationBarHidden(true)
@@ -670,19 +676,26 @@ public struct PhotoRepairView: View {
 
     @ViewBuilder
     private var bottomButton: some View {
+        // 需求1：所有态按钮统一底部对齐（外层固定 140pt 高 + 底部对齐），位置不随态变化
         if result != nil {
             // 需求3+4：完成页删掉「重新选择照片」，只留 outlined「返回/继续修复」
             // （原型图2：文案+对比原图在上，按钮最下方；左上角返回常驻可回选择页/首页）
-            ToolPrimaryButton("返回/继续修复", outlined: true) { reset() }
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                ToolPrimaryButton("返回/继续修复", outlined: true) { reset() }
+            }
         } else if original != nil {
-            ToolPrimaryButton(working ? "处理中…" : "开始修复", enabled: !working) { start() }
-            Button("重新选择照片") { pickPhoto() }
-                .font(.system(size: 13))
-                .foregroundStyle(CleanPalette.green)
-                .padding(.top, 10)
+            VStack(spacing: 10) {
+                Spacer(minLength: 0)
+                ToolPrimaryButton(working ? "处理中…" : "开始修复", enabled: !working) { start() }
+                Button("重新选择照片") { pickPhoto() }
+                    .font(.system(size: 13))
+                    .foregroundStyle(CleanPalette.green)
+            }
         } else {
             // 需求1（原型图1）：无上方灰字文案，按钮组在最下——「选择照片 +」→「试试示例照片」
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
+                Spacer(minLength: 0)
                 ToolPrimaryButton("选择照片 +") { pickPhoto() }
                 Button("没有照片？试试示例照片") { useSample() }
                     .font(.system(size: 13))
@@ -763,11 +776,15 @@ public struct PhotoCutoutView: View {
             CleanPalette.pageBackground.ignoresSafeArea()
             VStack(spacing: 0) {
                 ToolNavBar(title: "照片抠图", onBack: { dismiss() }) { EmptyView() }
-                Spacer(minLength: 0)
+                // Bug表r30：同 r29——图片区固定从导航栏下方开始，示例态与选照片后位置一致
                 content
+                    .padding(.top, 14)
                 Spacer(minLength: 0)
+                // 需求2：底部按钮区固定高度，示例态/选后态按钮位置完全一致
                 bottomButton
-                    .padding(.bottom, 72)
+                    .frame(height: 140)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 30)
             }
         }
         .navigationBarHidden(true)
@@ -833,19 +850,26 @@ public struct PhotoCutoutView: View {
 
     @ViewBuilder
     private var bottomButton: some View {
+        // 需求2：所有态按钮统一底部对齐（外层固定 140pt 高 + 底部对齐），位置不随态变化
         if result != nil {
             // 需求3+4：完成页删掉「重新选择照片」，只留 outlined「返回/继续修复」
             //（原型同修复页：文案+复制入口在上，按钮最下；左上角返回常驻）
-            ToolPrimaryButton("返回/继续修复", outlined: true) { reset() }
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                ToolPrimaryButton("返回/继续修复", outlined: true) { reset() }
+            }
         } else if original != nil {
-            ToolPrimaryButton(working ? "处理中…" : "开始抠图", enabled: !working) { start() }
-            Button("重新选择照片") { pickPhoto() }
-                .font(.system(size: 13))
-                .foregroundStyle(CleanPalette.green)
-                .padding(.top, 10)
+            VStack(spacing: 10) {
+                Spacer(minLength: 0)
+                ToolPrimaryButton(working ? "处理中…" : "开始抠图", enabled: !working) { start() }
+                Button("重新选择照片") { pickPhoto() }
+                    .font(.system(size: 13))
+                    .foregroundStyle(CleanPalette.green)
+            }
         } else {
             // 需求1：无上方灰字文案，按钮组在最下——「选择照片 +」→「试试示例照片」
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
+                Spacer(minLength: 0)
                 ToolPrimaryButton("选择照片 +") { pickPhoto() }
                 Button("没有照片？试试示例照片") { useSample() }
                     .font(.system(size: 13))

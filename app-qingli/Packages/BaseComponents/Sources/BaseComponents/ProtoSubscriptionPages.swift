@@ -138,6 +138,10 @@ public struct ProtoSubscriptionSuccessView: View {
 }
 
 // MARK: - 已订阅页（管理订阅入口）+ 续订弹窗
+//
+// 需求4（原 r25 模糊问题根治）：整页位图只有 1x 分辨率，位图文字在 3x 屏上必然发虚。
+// 重构为「插画位图 + 原生 Text」：顶部 3D 插画沿用位图（subscribed_hero.png，402x416，
+// 从原 subscribed.png 裁出、文字已全部裁掉），标题/权益/按钮全部原生 SwiftUI 渲染，任意分辨率锐利。
 
 public struct ProtoSubscribedView: View {
     let onClose: () -> Void
@@ -151,17 +155,75 @@ public struct ProtoSubscribedView: View {
     }
 
     public var body: some View {
-        ZStack {
-            ProtoPageCanvas(asset: "assets/proto/subscribed.png") { k in
+        GeometryReader { geo in
+            let w = geo.size.width
+            let k = w / protoCanvasWidth
+            ZStack(alignment: .topLeading) {
+                // 页面背景与插画位图底色一致（原画布渐变收敛后的纯色）
+                Color(hex: "F7FFFA").ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    // 顶部 3D 插画（位图，已裁掉全部文字；✕ 关闭钮仍在位图原位）
+                    if let hero = protoPageImage("assets/proto/subscribed_hero.png") {
+                        Image(uiImage: hero)
+                            .resizable()
+                            .frame(width: w, height: 416 * k)
+                    }
+
+                    // ---- 以下全部原生文本（清晰渲染，替代位图烧录文字）----
+                    VStack(spacing: 0) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "crown.fill")
+                                .font(.system(size: 26))
+                                .foregroundStyle(Color(hex: "F7B500"))
+                            Text("已成功订阅")
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundStyle(Color(hex: "1A1A1A"))
+                        }
+                        .padding(.top, 22)
+                        Text("会员权益已激活，清理更高效")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color(hex: "636664"))
+                            .padding(.top, 12)
+
+                        VStack(alignment: .leading, spacing: 18) {
+                            benefitRow("photo.stack", "相似模糊截图清理")
+                            benefitRow("wand.and.stars", "照片修复 & 智能抠图")
+                            benefitRow("arrow.up.left.and.arrow.down.right", "图片 & 视频压缩")
+                            benefitRow("infinity", "全程本地，无限清理")
+                        }
+                        .padding(.top, 26)
+                        .frame(maxWidth: .infinity)
+
+                        Spacer(minLength: 12)
+
+                        Button(action: onContinue) {
+                            Text("继续优化")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 64)
+                        }
+                        .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color(hex: "5BC265")))
+                        .accessibilityIdentifier("subscribed.continue")
+
+                        Button(action: { showRenewGuide = true }) {
+                            Text("取消续费")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Color(hex: "838884"))
+                                .padding(.top, 14)
+                                .padding(.bottom, 10)
+                        }
+                        .accessibilityIdentifier("subscribed.cancel")
+                    }
+                    .padding(.horizontal, 30)
+                }
+
+                // 位图左上角 ✕ 的热区（✕ 保留在插画位图里，热区沿用原 identifier/位置）
                 ProtoHitArea(x: 36, y: 72, width: 48, height: 48, scale: k, radius: 24,
                              identifier: "subscribed.close", label: "关闭",
                              action: onClose)
-                ProtoHitArea(x: 199, y: 757, width: 344, height: 68, scale: k, radius: 16,
-                             identifier: "subscribed.continue", label: "继续优化",
-                             action: onContinue)
-                ProtoHitArea(x: 201, y: 824, width: 132, height: 40, scale: k, radius: 8,
-                             identifier: "subscribed.cancel", label: "取消续费",
-                             action: { showRenewGuide = true })
             }
 
             // 「取消续费」→ 续订弹窗（如何取消自动续费）
@@ -172,6 +234,19 @@ public struct ProtoSubscribedView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showRenewGuide)
+    }
+
+    /// 权益行：绿色小图标 + 黑色正文（按位图测量：图标 #66C175、文字 #1A1A1A 16pt、行距 34pt）
+    private func benefitRow(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color(hex: "66C175"))
+                .frame(width: 24)
+            Text(text)
+                .font(.system(size: 16))
+                .foregroundStyle(Color(hex: "1A1A1A"))
+        }
     }
 }
 

@@ -387,6 +387,14 @@ public enum NavFormat {
         return f.string(from: date)
     }
 
+    /// 固定带日期的时间（海拔记录等需要跨天回看的场景，【Bug 行21】）
+    public static func dateTime(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日 HH:mm"
+        return f.string(from: date)
+    }
+
     public static func coordinate(_ lat: Double, _ lon: Double) -> String {
         String(format: "%.6f, %.6f", lat, lon)
     }

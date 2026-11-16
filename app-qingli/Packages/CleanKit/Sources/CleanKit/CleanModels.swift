@@ -74,8 +74,8 @@ public struct CleanGroup: Identifiable {
     }
 }
 
-/// 扫描结果汇总
-public struct ScanSummary {
+/// 扫描结果汇总（Equatable：r26 首页比对 CleanCenter 最新值决定是否刷新）
+public struct ScanSummary: Equatable {
     public var groups: [CleanKind: [CleanGroup]] = [:]
     public var totalCleanableBytes: Int64 {
         groups.values.flatMap { $0 }.reduce(0) { $0 + $1.cleanableBytes }
@@ -89,6 +89,12 @@ public struct ScanSummary {
     }
     public func count(for kind: CleanKind) -> Int {
         groups(for: kind).reduce(0) { $0 + $1.assets.filter { !$0.isBest }.count }
+    }
+
+    public static func == (lhs: ScanSummary, rhs: ScanSummary) -> Bool {
+        lhs.totalCleanableBytes == rhs.totalCleanableBytes
+            && lhs.totalCleanableCount == rhs.totalCleanableCount
+            && lhs.groups.keys == rhs.groups.keys
     }
 }
 

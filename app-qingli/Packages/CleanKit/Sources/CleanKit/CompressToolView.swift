@@ -43,6 +43,7 @@ public struct CompressToolView: View {
     @State private var strength: Strength = .light
     @State private var pickerOpen = false
     @State private var picked: [PickedItem] = []
+    @State private var pickedPage = 0      // r32：多选大图轮播页码
     @State private var working = false
     @State private var progressValue: Double = 0
     @State private var done: DoneState?
@@ -202,19 +203,26 @@ public struct CompressToolView: View {
             pickerOpen = true
         } label: {
             CleanCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(mode == .video ? "添加视频" : "添加照片")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color(hex: "6B7078"))
-                        .padding(12)
+                VStack(spacing: 0) {
+                    HStack {
+                        Text(mode == .video ? "添加视频" : "添加照片")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color(hex: "6B7078"))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 14)
+                    // Bug表r31+需求3：添加区域整体加大，加号水平垂直居中（标题只占顶部，加号独占剩余空间居中）
                     Image(systemName: "plus")
-                        .font(.system(size: 34, weight: .light))
+                        .font(.system(size: 40, weight: .light))
                         .foregroundStyle(Color(hex: "B9BDC4"))
-                        .frame(maxWidth: .infinity)
-                        .padding(.bottom, 80)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(minHeight: 250)
                 }
+                .frame(minHeight: 310)
             }
         }
+        .accessibilityIdentifier(mode == .video ? "compress.addVideo" : "compress.addPhoto")
     }
 
     // MARK: - 预估卡
@@ -268,7 +276,7 @@ public struct CompressToolView: View {
 
     private var pickedList: some View {
         CleanCard {
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 HStack {
                     Text("已选 \(picked.count) 项")
                         .font(.system(size: 13))
@@ -278,14 +286,26 @@ public struct CompressToolView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(CleanPalette.green)
                 }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(picked) { item in
+                // Bug表r32：已选内容大图居中展示——单张大图（宽撑满、高 320），
+                // 多张横向滑动逐张查看（TabView 页签式居中翻页），不再 64pt 小缩略图条
+                if picked.count == 1, let only = picked.first {
+                    AssetThumb(assetID: only.id, isVideo: only.isVideo)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 320)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                } else {
+                    TabView(selection: $pickedPage) {
+                        ForEach(Array(picked.enumerated()), id: \.element.id) { idx, item in
                             AssetThumb(assetID: item.id, isVideo: item.isVideo)
-                                .frame(width: 64, height: 64)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 320)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .tag(idx)
+                                .padding(.horizontal, 2)
                         }
                     }
+                    .tabViewStyle(.page(indexDisplayMode: .automatic))
+                    .frame(height: 320)
                 }
             }
             .padding(14)

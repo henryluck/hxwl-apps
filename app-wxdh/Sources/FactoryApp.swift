@@ -3,6 +3,8 @@ import Capabilities
 import CoreKit
 import Network
 import SwiftUI
+import AMapFoundationKit
+import AMapSearchKit
 
 // 集成适配包：按选配条件导入。没被 project.yml 引用的包 canImport 返回 false，
 // 对应 import 和分支整体不编译，SDK 不进二进制。clone 二次装配时只改 project.yml，
@@ -56,6 +58,18 @@ struct FactoryApp: App {
 
         let spec = AppSpec.load()
         self.spec = spec
+        // 高德 iOS SDK：地图/搜索/导航统一用高德，Key 从 spec.integrations.amap 注入。
+        // 必须在任何 SDK 接口调用前设置（路径规划、POI 检索都校验 Key）。
+        if let amapKey = spec.integrations?.amap?.key, !amapKey.isEmpty {
+            // 隐私合规（App 有隐私弹窗且用户同意后再调；工厂流程在启动页阶段完成同意）
+            AMapSearchAPI.updatePrivacyShow(.didShow, privacyInfo: .didContain)
+            AMapSearchAPI.updatePrivacyAgree(.didAgree)
+            AMapServices.shared().apiKey = amapKey
+            AMapServices.shared().enableHTTPS = true   // 模拟器 HTTP 明文通道易被网络层拦截
+            Log.info("[AMap] SDK 已初始化 key=\(amapKey.prefix(6))… https=\(AMapServices.shared().enableHTTPS)")
+        } else {
+            Log.warn("[AMap] spec.integrations.amap.key 缺失，规划/检索将静默失败")
+        }
         // 中台（ios-server AES 代理）：先建，便于注入 IAP 验单与启动流程
         let zhongtaiClient: ZhongtaiClient? = {
             guard let zt = spec.integrations?.zhongtai,
@@ -292,7 +306,8 @@ struct FactoryApp: App {
                     ZStack {
                         Color(hex: "184853").ignoresSafeArea()
                         if let splash = spec.onboarding?.splash {
-                            SplashView(image: splash, theme: capabilities.theme)
+                            // 【Bug 行24】offsetX 迭代调参：用户指定 -4（图左移 4pt）
+                            SplashView(image: splash, theme: capabilities.theme, offsetX: -4)
                         } else {
                             capabilities.theme.colors.bgPage.ignoresSafeArea()
                         }
