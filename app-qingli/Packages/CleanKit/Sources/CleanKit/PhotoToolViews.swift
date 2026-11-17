@@ -1096,10 +1096,9 @@ public struct LivePhotoToStillView: View {
             .safeAreaInset(edge: .bottom) {
                 ToolPrimaryButton(working ? "正在转换…" : "转为静态\(selected.isEmpty ? "" : "（\(selected.count)）")",
                                   enabled: !working && !selected.isEmpty) { convert() }
-                    // 需求1：白底与上方内容（已选提示文字）重叠 → 白底整体上移 5pt 让出间隙
-                    .padding(.bottom, 14)
-                    .background(Color.white.opacity(0.92))
-                    .offset(y: -5)
+                    // 按钮基于白底垂直居中：上下等距 padding
+                    .padding(.vertical, 14)
+                    .background(Color.white.opacity(0.96))
             }
         }
         .navigationBarHidden(true)

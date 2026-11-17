@@ -216,8 +216,6 @@ public struct CleanHomeView: View {
                 showPhotoAuthAlert = true
             }
         }
-        // Bug表r23：「一键智能清理」按钮加缩放脉动特效（与订阅页主按钮一致）
-        .modifier(ButtonPulseEffect())
         .accessibilityIdentifier("home.primaryAction")
     }
 
@@ -469,13 +467,12 @@ public struct CleanHomeView: View {
 struct StorageGauge: View {
     let ratio: Double   // 0~1 已用占比
 
-    // 三段效果（用户指定）：第一段红→黄渐变，第二段黄→绿渐变，第三段纯绿
-    // 用户反馈红黄太浅 → 加深（红 E53935→C62828，黄 FDD835→F9A825）
-    // 再次反馈「条形参数颜色太浅，重一点」→ 全段再加深 + 未激活段透明度 0.35→0.55
-    private let seg1Start = Color(hex: "B71C1C")   // 更深红
-    private let seg1End = Color(hex: "E65100")     // 更深橙
-    private let seg2Start = Color(hex: "E65100")   // 深橙
-    private let seg2End = Color(hex: "1B5E20")     // 更深绿
+    // 三段效果（用户指定）：第一段深红→深黄渐变，第二段深黄→深绿渐变，第三段深绿
+    // （此前 seg1End/seg2Start 误用橙色 E65100 → 改回深黄 F9A825，两段交界颜色衔接）
+    private let seg1Start = Color(hex: "B71C1C")   // 深红
+    private let seg1End = Color(hex: "F9A825")     // 深黄
+    private let seg2Start = Color(hex: "F9A825")   // 深黄
+    private let seg2End = Color(hex: "1B5E20")     // 深绿
     private let seg3 = Color(hex: "2E7D32")        // 深绿
 
     var body: some View {

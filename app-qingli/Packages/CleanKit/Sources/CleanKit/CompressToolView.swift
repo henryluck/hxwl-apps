@@ -349,16 +349,8 @@ public struct CompressToolView: View {
     }
 
     private var progressCard: some View {
-        CleanCard {
-            VStack(spacing: 10) {
-                ProgressView(value: progressValue)
-                    .tint(CleanPalette.green)
-                Text("正在压缩…")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color(hex: "6B7078"))
-            }
-            .padding(18)
-        }
+        // 需求：进度条样式与照片修复页一致（ToolProgress：白底胶囊 + 绿色进度 + 滑动圆点 + 状态文案）
+        ToolProgress(value: progressValue, label: "正在压缩…")
     }
 
     // MARK: - 执行

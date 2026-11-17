@@ -11,15 +11,13 @@ struct AltitudeScreen: View {
     @State private var showHistory = false
     @State private var note = ""
     @State private var copied = false
-    /// 【Bug 行20】NavStores 非 ObservableObject，保存记录后视图不会自动重读 stores；
-    /// 用刷新令牌在保存/删除后手动触发 UI 更新
-    @State private var recordsVersion = 0
-
-    private var snapshot: LocationSnapshot? { model.location.snapshot }
-
     /// 未订阅时锁定数据展示（对齐原型 alt-page-v14 锁定态）：
     /// 大数字显示「——」占位，胶囊标签为固定 slogan，不暴露真实海拔/更新时间
     private var locked: Bool { !model.isUnlocked }
+    // 【Bug 行39】记录刷新已改由 NavStores.altitudeRecords @Published + objectWillChange
+    // 转发驱动，不再需要手动刷新令牌
+
+    private var snapshot: LocationSnapshot? { model.location.snapshot }
 
     var body: some View {
         ZStack {
@@ -413,7 +411,7 @@ struct AltitudeScreen: View {
             note: note.trimmingCharacters(in: .whitespacesAndNewlines),
             createdAt: Date())
         if model.stores.addAltitudeRecord(record) {
-            recordsVersion += 1   // 【Bug 行20】立即刷新记录数与历史列表
+            // 【Bug 行39】@Published 变更经 objectWillChange 转发自动刷新 UI
             showRecordSheet = false
         }
     }
@@ -473,11 +471,14 @@ struct AltitudeScreen: View {
                                         Spacer()
                                         Button {
                                             model.stores.deleteAltitudeRecord(id: record.id)
-                                            recordsVersion += 1   // 【Bug 行20】删除后立即刷新
                                         } label: {
                                             Image(systemName: "trash")
                                                 .font(.system(size: 15))
                                                 .foregroundStyle(Color(hex: "526F5D"))
+                                                // 【Bug 行39】扩大点击热区：15pt 图标太小，
+                                                // 真机上经常点不中表现为"删除没反应"
+                                                .frame(width: 36, height: 36)
+                                                .contentShape(Rectangle())
                                         }
                                         .buttonStyle(.plain)
                                     }

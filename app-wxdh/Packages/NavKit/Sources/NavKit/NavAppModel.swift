@@ -75,7 +75,15 @@ public final class NavAppModel: ObservableObject {
 
     // 一级导航
     @Published public var tab: NavTab = .navigate
-    @Published public var flow: NavFlow = .home
+    /// 【Bug 行32】返回首页时统一收口清理：地图规划线、起终点标注、起终点输入
+    /// （此前 back() 只切 flow 不清理 → 地图残留路线、输入框保留旧值）
+    @Published public var flow: NavFlow = .home {
+        didSet {
+            if oldValue != .home, flow == .home {
+                clearPlanState()
+            }
+        }
+    }
     @Published public var showProfile = false
 
     // 地图
@@ -130,7 +138,9 @@ public final class NavAppModel: ObservableObject {
         // ObservedObject model —— 子服务的 @Published 变化（engine.phase planning→failed、
         // location.snapshot 等）不会触发 model 的 objectWillChange，规划页永远显示
         // 「正在规划…」。把子服务的变更转发到 model 的 objectWillChange（AVL 树顺序无关）。
-        for publisher in [engine.objectWillChange, location.objectWillChange] {
+        // 【Bug 行39】stores 也纳入转发：海拔记录改 @Published 后由 objectWillChange
+        // 驱动视图刷新，替代脆弱的手动刷新令牌
+        for publisher in [engine.objectWillChange, location.objectWillChange, stores.objectWillChange] {
             publisher
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -148,7 +158,25 @@ public final class NavAppModel: ObservableObject {
                 Task { await self.locate() }
             }
             .store(in: &childCancellables)
+        // 【Bug 行34】定位快照**首次获得**时 → 地图落位（若首页地图已挂载）。
+        // 授权后自动定位可能发生在规划/周边等页面（地图未挂载时 fit 静默跳过），
+        // snapshot 先落库；等首页地图出现时由这里补 fit，解决"授权完首页仍不落位"。
+        // 只在 nil → 有值的一次性跳变触发：导航中连续定位会频繁更新 snapshot，
+        // 不能每次都拉镜头（导航镜头由官方导航视图接管）。
+        location.$snapshot
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] snap in
+                guard let self, let snap, self.didFitOnFirstFix else { return }
+                self.didFitOnFirstFix = false
+                self.mapController.fit(MKCoordinateRegion(
+                    center: snap.place.gcj02Coordinate,
+                    latitudinalMeters: 2500, longitudinalMeters: 2500))
+            }
+            .store(in: &childCancellables)
     }
+
+    /// 【Bug 行34】首次定位落位标记：首个快照 fit 一次，之后的快照更新不再拉镜头
+    private var didFitOnFirstFix = true
 
     /// 【Bug 行31】授权后自动定位只执行一次的标记
     private var autoLocatedAfterAuth = false
@@ -369,6 +397,16 @@ public final class NavAppModel: ObservableObject {
         // 避免同一目的地瞬间打出两个高德规划请求互相覆盖）
     }
 
+    /// 【Bug 行32】返回首页的统一清理：地图线/标注、起终点输入、搜索词
+    public func clearPlanState() {
+        mapController.clearRoute()
+        origin = nil
+        destination = nil
+        searchText = ""
+        searchResults = []
+        suggestions = []
+    }
+
     /// 规划在途标记：并发调用 plan()（openPlan/页面 task/重试）时只放行第一个
     private var planInFlight = false
     /// 【Bug 行27】在途期间有新模式切换进来 → 置位，本轮结束后自动补一轮最新模式的规划
@@ -396,8 +434,27 @@ public final class NavAppModel: ObservableObject {
                 return
             }
         }
-        if originPlace == nil, let fix = await location.requestSingleFix(), fix.isUsable {
-            originPlace = fix.place
+        if originPlace == nil {
+            // 【Bug 行38·规划慢的根因】起点定位门槛过严导致双重超时黑洞：
+            // ① 快照复用门槛 isUsable（≤100m 且 ≤20s）——30~60 秒前的可用快照被当过期
+    //    丢弃重新定位，白等一轮；② 弱信号下第一炮精度 >100m 判无效 → 补炮再等
+    //    10s → 两炮都"不可用"直接失败。而高德算路对起点只有坐标要求（道路级），
+            // 精度 200m 内完全可用，事后还有偏航重规划兜底。
+            // 修复：优先复用 60s 内、精度 ≤200m 的缓存快照（零等待）；新定位拿到坐标即用。
+            if let snap = location.snapshot, snap.age <= 60, snap.horizontalAccuracy > 0,
+               snap.horizontalAccuracy <= 200 {
+                originPlace = snap.place
+            } else {
+                var got = await location.requestSingleFix(timeout: 6)
+                if got == nil {
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    got = await location.requestSingleFix(timeout: 8)
+                }
+                if let got {
+                    // 有坐标即用：弱精度不再丢弃（规划起点道路级容忍 + 偏航重规划兜底）
+                    originPlace = got.place
+                }
+            }
         }
         guard let originPlace, originPlace.hasValidCoordinate else {
             Log.warn("[Plan] 起点不可用 auth=\(location.authState)")
@@ -464,6 +521,9 @@ public final class NavAppModel: ObservableObject {
     /// 主动退出 → 回路线规划，保留目标与方式（NAV-34）
     public func exitNavigation() {
         engine.exit()
+        // 【Bug 行36】立即回到规划态：此前停在 .ended，开始导航按钮要等下一次
+        // plan() 才恢复可点（表现为"停止导航后按钮灰很久"）
+        engine.returnToPlanning()
         flow = .plan
         if let route = engine.selectedRoute {
             mapController.showRoute(route.polyline, origin: originDisplay, destination: destination)

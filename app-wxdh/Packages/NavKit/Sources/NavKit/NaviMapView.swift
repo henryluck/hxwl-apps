@@ -5,6 +5,15 @@ import SwiftUI
 
 /// 高德官方导航视图容器（AMapNaviDriveView / WalkView / RideView）
 /// 通过 NaviService.addDataRepresentative(view) 注册后自动渲染导航过程。
+///
+/// 【Bug 行28/36】方向一致性修复（对比高德官方 App）：
+/// ① 初始 trackingMode 显式 .carNorth（车头朝上，地图随行进方向旋转）——
+///    三个视图 SDK 默认都是 .mapNorth（正北朝上），不跟随行进方向；
+/// ② Ride/Walk 视图没有 canChangeTrackingMode 开关（仅 DriveView 有），
+///    SDK 内部在普通态会自行切回正北朝上 → 用 view delegate 的
+///    didChangeTrackingMode 回调检测到非 carNorth 立即改回；
+/// ③ showMode 锁 .carPositionLocked（锁车态）——锁车态下 SDK 才按
+///    车头朝上驱动地图旋转；用户拖图后回跟随也回到锁车态。
 public struct AMapNaviViewContainer: UIViewRepresentable {
     let kind: NaviViewKind
     let onAttached: (UIView) -> Void
@@ -20,20 +29,24 @@ public struct AMapNaviViewContainer: UIViewRepresentable {
         case .drive:
             let v = AMapNaviDriveView(frame: .zero)
             v.showUIElements = false   // 用自研 UI 横幅，隐藏官方 UI（保留地图渲染）
-            // 【Bug 行28】显式锁车头朝上：地图随行进方向旋转，与手机朝向一致。
-            // 默认虽为 CarNorth，但用户手动拖图后官方会自动切回正北朝上导致"方向不一致"
             v.trackingMode = .carNorth
-            v.canChangeTrackingMode = false
+            v.showMode = .carPositionLocked
+            v.canChangeTrackingMode = false   // DriveView 专属开关：禁止 SDK 内部改回正北
+            v.delegate = context.coordinator
             view = v
         case .walk:
             let v = AMapNaviWalkView(frame: .zero)
             v.showUIElements = false
             v.trackingMode = .carNorth
+            v.showMode = .carPositionLocked
+            v.delegate = context.coordinator
             view = v
         case .ride:
             let v = AMapNaviRideView(frame: .zero)
             v.showUIElements = false
             v.trackingMode = .carNorth
+            v.showMode = .carPositionLocked
+            v.delegate = context.coordinator
             view = v
         }
         onAttached(view)
@@ -41,6 +54,71 @@ public struct AMapNaviViewContainer: UIViewRepresentable {
     }
 
     public func updateUIView(_ uiView: UIView, context: Context) {}
+
+    public func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// 强制「车头朝上」的守护者：SDK 改掉跟随模式就立即改回来
+    public final class Coordinator: NSObject,
+                                    AMapNaviDriveViewDelegate,
+                                    AMapNaviWalkViewDelegate,
+                                    AMapNaviRideViewDelegate {
+
+        /// 防抖：SDK 设置 trackingMode 会再触发一次 didChange 回调，
+        /// 用时间窗避免无限循环
+        private var lastCorrection = Date.distantPast
+
+        private func enforceCarNorth() {
+            guard Date().timeIntervalSince(lastCorrection) > 0.1 else { return }
+            lastCorrection = Date()
+            Task { @MainActor in
+                guard let view = NaviService.shared.activeNaviView else { return }
+                switch view {
+                case let drive as AMapNaviDriveView:
+                    if drive.trackingMode != .carNorth { drive.trackingMode = .carNorth }
+                    if drive.showMode != .carPositionLocked { drive.showMode = .carPositionLocked }
+                case let walk as AMapNaviWalkView:
+                    if walk.trackingMode != .carNorth { walk.trackingMode = .carNorth }
+                    if walk.showMode != .carPositionLocked { walk.showMode = .carPositionLocked }
+                case let ride as AMapNaviRideView:
+                    if ride.trackingMode != .carNorth { ride.trackingMode = .carNorth }
+                    if ride.showMode != .carPositionLocked { ride.showMode = .carPositionLocked }
+                default:
+                    break
+                }
+            }
+        }
+
+        // MARK: - AMapNaviDriveViewDelegate
+
+        public func driveView(_ driveView: AMapNaviDriveView, didChange trackingMode: AMapNaviViewTrackingMode) {
+            if trackingMode != .carNorth { enforceCarNorth() }
+        }
+
+        public func driveView(_ driveView: AMapNaviDriveView, didChange showMode: AMapNaviDriveViewShowMode) {
+            // 全览态是我们自己的「回到跟随」按钮路径，普通态可能是 SDK 内部切换 → 都拉回锁车
+            if showMode == .normal { enforceCarNorth() }
+        }
+
+        // MARK: - AMapNaviWalkViewDelegate
+
+        public func walkView(_ walkView: AMapNaviWalkView, didChange trackingMode: AMapNaviViewTrackingMode) {
+            if trackingMode != .carNorth { enforceCarNorth() }
+        }
+
+        public func walkView(_ walkView: AMapNaviWalkView, didChange showMode: AMapNaviWalkViewShowMode) {
+            if showMode == .normal { enforceCarNorth() }
+        }
+
+        // MARK: - AMapNaviRideViewDelegate
+
+        public func rideView(_ rideView: AMapNaviRideView, didChange trackingMode: AMapNaviViewTrackingMode) {
+            if trackingMode != .carNorth { enforceCarNorth() }
+        }
+
+        public func rideView(_ rideView: AMapNaviRideView, didChange showMode: AMapNaviRideViewShowMode) {
+            if showMode == .normal { enforceCarNorth() }
+        }
+    }
 }
 
 /// 非导航场景的高德普通地图（规划页：显示多方案路线）
@@ -48,6 +126,16 @@ public struct AMapNaviViewContainer: UIViewRepresentable {
 public struct AMapPlanMapView: UIViewRepresentable {
     public final class Coordinator: NSObject, MAMapViewDelegate {
         var onUserInteraction: (() -> Void)?
+        /// 【Bug 行35】地图初始化完成回调：规划页 .task 可能先于 makeUIView 执行，
+        /// 路线画到了旧/空地图上。地图就绪后通知视图层重画一次。
+        var onMapReady: (() -> Void)?
+        private var firedReady = false
+
+        public func mapViewInitComplete(_ mapView: MAMapView) {
+            guard !firedReady else { return }
+            firedReady = true
+            onMapReady?()
+        }
 
         public func mapView(_ mapView: MAMapView!, mapWillMoveByUser wasUserAction: Bool) {
             if wasUserAction { onUserInteraction?() }
@@ -75,10 +163,13 @@ public struct AMapPlanMapView: UIViewRepresentable {
     }
 
     let onUserInteraction: () -> Void
+    let onMapReady: () -> Void
     weak var coordinator: Coordinator?
 
-    public init(onUserInteraction: @escaping () -> Void) {
+    public init(onUserInteraction: @escaping () -> Void = {},
+                onMapReady: @escaping () -> Void = {}) {
         self.onUserInteraction = onUserInteraction
+        self.onMapReady = onMapReady
     }
 
     public func makeUIView(context: Context) -> MAMapView {
@@ -90,6 +181,7 @@ public struct AMapPlanMapView: UIViewRepresentable {
         map.showsScale = false
         map.delegate = context.coordinator
         context.coordinator.onUserInteraction = onUserInteraction
+        context.coordinator.onMapReady = onMapReady
         PlanMapHolder.shared.mapView = map
         return map
     }
@@ -152,7 +244,7 @@ public final class PlanMapHolder: ObservableObject {
     }
 
     public func fit(routes: [RouteOption]) {
-        guard let map = mapView, let first = routes.first else { return }
+        guard let map = mapView, !routes.isEmpty else { return }
         var minLat = 90.0, maxLat = -90.0, minLon = 180.0, maxLon = -180.0
         for route in routes {
             for c in route.polyline {
@@ -166,7 +258,6 @@ public final class PlanMapHolder: ObservableObject {
         let span = MACoordinateSpan(latitudeDelta: max(0.02, (maxLat - minLat) * 1.5),
                                     longitudeDelta: max(0.02, (maxLon - minLon) * 1.5))
         map.setRegion(MACoordinateRegion(center: center, span: span), animated: true)
-        _ = first
     }
 
     private init() {}

@@ -330,9 +330,31 @@ public final class NaviService: NSObject, ObservableObject {
             ? AMapNaviRideManager.sharedInstance().startEmulatorNavi()
             : AMapNaviRideManager.sharedInstance().startGPSNavi()
         }
-        if ok { isNavigating = true }
+        if ok {
+            isNavigating = true
+            enforceCarNorthTracking()   // 【Bug 行36】导航启动即锁车头朝上 + 锁车态
+        }
         Log.info("[NaviSDK] startNavi(\(emulator ? "emulator" : "gps")) kind=\(viewKind) ok=\(ok)")
         return ok
+    }
+
+    /// 【Bug 行36】强制车头朝上 + 锁车态（地图与箭头跟随行进方向，对齐高德官方 App）。
+    /// Ride/Walk 视图无 canChangeTrackingMode 开关，SDK 内部会改回正北朝上——
+    /// 在导航启动、实时定位更新（heading 变化）时显式压回。
+    public func enforceCarNorthTracking() {
+        switch activeNaviView {
+        case let drive as AMapNaviDriveView:
+            drive.trackingMode = .carNorth
+            drive.showMode = .carPositionLocked
+        case let walk as AMapNaviWalkView:
+            walk.trackingMode = .carNorth
+            walk.showMode = .carPositionLocked
+        case let ride as AMapNaviRideView:
+            ride.trackingMode = .carNorth
+            ride.showMode = .carPositionLocked
+        default:
+            break
+        }
     }
 
     public func stopNavi() {

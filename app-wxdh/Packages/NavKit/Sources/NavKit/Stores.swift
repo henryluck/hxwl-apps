@@ -4,7 +4,10 @@ import Foundation
 /// 本机存储：搜索历史、常用地点、海拔记录、停车便签、天气地区
 /// 统一 JSON 落 UserDefaults，失败不假报成功（R-030/R-033/R-038）
 @MainActor
-public final class NavStores {
+public final class NavStores: ObservableObject {
+    /// 【Bug 行39】海拔记录改为 @Published：此前普通数组 + 视图层手动刷新令牌，
+    /// 保存/删除的时序缝隙导致「记录 1 条显示 0 条」「删除按钮无反应」
+    @Published public private(set) var altitudeRecords: [AltitudeRecord] = []
     public static let shared = NavStores()
 
     private let defaults = UserDefaults.standard
@@ -83,7 +86,6 @@ public final class NavStores {
         public var createdAt: Date
     }
 
-    public private(set) var altitudeRecords: [AltitudeRecord] = []
     private let altitudeKey = "nav.altitude.v1"
 
     public func addAltitudeRecord(_ record: AltitudeRecord) -> Bool {

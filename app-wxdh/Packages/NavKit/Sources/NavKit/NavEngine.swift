@@ -176,7 +176,9 @@ public final class NavEngine: ObservableObject {
         // 实时导航必须从设备真实位置起步；位置不可用直接失败分流。
         // 【Bug 行29】单次定位偶发超时/弱信号（室内边缘常见）会让用户"提示不成功、
         // 多试几次才能进"——改为失败后自动补一炮（800ms 间隔），两次都失败才报错。
-        guard let fix = await location.requestSingleFix(), fix.isUsable else {
+        // 【Bug 行37】首炮超时 8→5s：规划刚完成时快照新鲜（秒开），只有快照过期后才
+        // 走真定位；5s 内拿不到就补炮（10s），总最坏耗时从 ~19s 收敛到 ~16s 且更早失败提示。
+        guard let fix = await location.requestSingleFix(timeout: 5), fix.isUsable else {
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard let retry = await location.requestSingleFix(timeout: 10), retry.isUsable else {
                 if !location.authState.isUsable {

@@ -24,8 +24,12 @@ struct RoutePlanView: View {
         GeometryReader { proxy in
             ZStack(alignment: .top) {
                 // 高德地图（与导航 SDK 同源，坐标系一致 GCJ-02）
-                AMapPlanMapView { }
-                    .ignoresSafeArea()
+                // 【Bug 行35】onMapReady：地图初始化完成后重画路线——.task 可能先于
+                // 地图挂载执行，首帧画到空地图上导致"进规划页看不到路线"
+                AMapPlanMapView(onUserInteraction: { }, onMapReady: {
+                    refreshPlanMap()
+                })
+                .ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     topBar
