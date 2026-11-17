@@ -87,12 +87,19 @@ public struct CleanDetailView: View {
         .safeAreaInset(edge: .bottom) {
             // 清理成功页自带「继续清理」按钮，不再显示底部主按钮。
             // 整个修饰（含白底）都放在条件内：否则成功页底部会残留一条 24pt 白条。
+            // 需求5：未访问/受限访问时按钮上下浮动 → 外层固定高度容器（scroll 边界抖动
+            // 不再传给按钮；VStack 内 Spacer 吸底保证按钮永远贴在原位置）
             if !showResult {
-                CleanPrimaryButton(buttonTitle, enabled: !cleaning && !selectedAssets.isEmpty) { performClean() }
-                    .accessibilityIdentifier("detail.primaryAction")
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 12)
-                    .background(Color.white.opacity(0.96))
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    CleanPrimaryButton(buttonTitle, enabled: !cleaning && !selectedAssets.isEmpty) { performClean() }
+                        .accessibilityIdentifier("detail.primaryAction")
+                }
+                .padding(.horizontal, 40)
+                .padding(.vertical, 12)
+                .frame(height: 76)
+                .frame(maxWidth: .infinity)
+                .background(Color.white.opacity(0.96))
             }
         }
         // Bug表r27：删除被拒（点「不允许」）→ 静默留在当页，移除「无法清理」alert
@@ -180,12 +187,11 @@ public struct CleanDetailView: View {
             if let best {
                 bestCell(best)
             }
-            // Bug表R9-3：多张照片左右滑动查看
+            // Bug表R9-3：多张照片左右滑动查看（每格固定 88x110，勾选圆点完整显示在格内右上角）
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 8) {
                     ForEach(rest) { asset in
                         thumbCell(asset)
-                            .frame(width: 88, height: 110)
                     }
                 }
                 .padding(.vertical, 1)
@@ -197,15 +203,21 @@ public struct CleanDetailView: View {
         ZStack(alignment: .topLeading) {
             AssetThumb(assetID: asset.id)
                 .frame(width: 120, height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Text("★ 最佳")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(Color(hex: "6B7078").opacity(0.85)))
-                .padding(6)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            // 需求4：最佳标签带勾选符号——与候选格勾选圆点视觉语言一致
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                Text("最佳")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(CleanPalette.green.opacity(0.92)))
+            .padding(6)
         }
+        .frame(width: 120, height: 150)
     }
 
     private func thumbCell(_ asset: CleanAsset) -> some View {
@@ -215,13 +227,18 @@ public struct CleanDetailView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 // Bug表R9-1：约束并裁切，照片内容不再超出范围
+                // 需求3：相似照片/视频里混入的截图/录屏比例不一 → 缩略图统一 4:5
+                // （与横向滑动格子 88x110 一致），图片 scaledToFill 裁切填满；
+                // 勾选圆点显示不全 → 上移到格内安全位（原 padding 5 被裁切边缘吃掉）
                 AssetThumb(assetID: asset.id, isVideo: asset.mediaType == .video)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
+                    .frame(width: 88, height: 110)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 SelectBadge(selected: isSelected)
-                    .padding(5)
+                    .frame(width: 20, height: 20)
+                    .padding(6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
+            .frame(width: 88, height: 110)
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(isSelected ? CleanPalette.green : .clear, lineWidth: 2)
@@ -273,9 +290,15 @@ public struct CleanDetailView: View {
         // 订阅门：未订阅拉起订阅页，不放行清理/转换
         guard !CoreFeatureGate.gate(pay) else { return }
         guard !cleaning else { return }
+        // 需求2（二次删除无反应）：成功页「继续清理」走 onCleaned()+dismiss 整页重建；
+        // 但如果用户从成功页左上角返回（不触发重建），summary 仍含已删资产 →
+        // 勾选还在旧资产上、再点清理时 fetch 不到资产 → guard 拦下没反应。
+        // 修复：清理完成时立即从本地 summary 移除已删资产 + 清空勾选，
+        // 页面数据（groups→candidates）随之刷新，第二次清理照常走通。
         let targets = selectedAssets
         guard !targets.isEmpty else { return }
         cleaning = true
+        let targetIDs = Set(targets.map { $0.id })
         let work: ([CleanAsset], @escaping @MainActor (CleanExecutor.Result) -> Void) -> Void =
             kind == .livePhotos ? CleanExecutor.shared.convertLiveToStatic : CleanExecutor.shared.clean
         work(targets) { r in
@@ -284,9 +307,23 @@ public struct CleanDetailView: View {
             // 不再弹「无法清理」提示弹窗（用户主动拒绝，无需打扰）。
             // 选中状态保留（回滚后资产仍在），用户可继续勾选或换别的清理。
             guard r.movedCount > 0 else { return }
+            removeAssets(ids: targetIDs)
+            selected.removeAll()
             result = r
             withAnimation(.easeInOut(duration: 0.25)) { showResult = true }
         }
+    }
+
+    /// 从本地 summary 中移除指定资产（无需等待重扫，网格/统计立即同步）
+    private func removeAssets(ids: Set<String>) {
+        var updated = summary
+        let kept = updated.groups(for: kind).compactMap { group -> CleanGroup? in
+            let remaining = group.assets.filter { !ids.contains($0.id) }
+            guard !remaining.isEmpty else { return nil }
+            return CleanGroup(id: group.id, kind: group.kind, assets: remaining)
+        }
+        updated.groups[kind] = kept
+        CleanCenter.shared.summary = updated
     }
 
     // MARK: - 成功页

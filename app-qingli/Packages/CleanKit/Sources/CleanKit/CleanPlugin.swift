@@ -64,6 +64,19 @@ struct CleanHomeTab: View {
     let context: PluginContext
     var onDepthChange: ((Bool) -> Void)? = nil
 
+    /// 需求6：已订阅冷启动会员标识状态错误——pay 是 ObservableObject（StoreKit 异步
+    /// 恢复购买后 isPro 变 true），但原来 `context.pay.isPro` 取一次性快照，订阅状态
+    /// 晚到时不刷新首页。`@ObservedObject` 不能包 existential 类型，改手动订阅
+    /// objectWillChange：状态变化时置 refresh 触发重算 isPro。
+    @State private var refresh = false
+    @State private var proWatchStarted = false
+
+    /// 当前是否已订阅（每次 body 重算，不受快照影响）
+    private var isProNow: Bool {
+        _ = refresh  // 依赖 refresh 触发重算
+        return context.pay.isPro
+    }
+
     fileprivate func reportDepth(_ depth: Bool) {
         NotificationCenter.default.post(name: .pluginSubpageDepth,
                                         object: nil,
@@ -81,8 +94,10 @@ struct CleanHomeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             CleanHomeView(theme: context.theme,
-                          // -uitest-pro 与订阅门同一开关：测试已订阅入口链路（真实状态仍以 pay.isPro 为准）
-                          isPro: context.pay.isPro || ProcessInfo.processInfo.arguments.contains("-uitest-pro"),
+                          // 需求6：跟随 pay.objectWillChange 实时刷新（见 isProNow）；
+                          // -uitest-pro 仍保留为测试注入
+                          isPro: isProNow
+                              || ProcessInfo.processInfo.arguments.contains("-uitest-pro"),
                           onDeepClean: { path.append(Route.scan) },
                           openAnalysis: { path.append(Route.analysis) },
                           openCategory: { kind in path.append(Route.detail(kind)) },
@@ -105,6 +120,23 @@ struct CleanHomeTab: View {
         }
         .onAppear { reportDepth(path.count > 0) }
         .onDisappear { reportDepth(false) }
+        // 需求6：兜底轮询——StoreKit 恢复购买是异步的，objectWillChange 无法经通知中心
+        // 广播（ObservableObject 不走 NotificationCenter），改为每 1.5s 比对 isPro，
+        // 变化即 refresh.toggle() 触发 body 重算（首页已订阅标识立即纠正）。
+        // 变化一次后自动停（isPro 不会反复变）。
+        .onAppear {
+            guard !proWatchStarted else { return }
+            proWatchStarted = true
+            let lastIsPro = context.pay.isPro
+            Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { t in
+                Task { @MainActor in
+                    if context.pay.isPro != lastIsPro {
+                        refresh.toggle()
+                        t.invalidate()
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -114,10 +146,24 @@ struct CleanHomeTab: View {
             // 深度扫描页：完成后自动接续到智能清理建议页
             CleanScanView { path.append(Route.suggest) }
         case .suggest:
+            // 需求：建议页出现时把栈里的扫描页挤掉（home → suggest），
+            // 从建议页点返回直接回首页，不会再闪过扫描页
             CleanSuggestView(summary: CleanCenter.shared.summary ?? ScanSummary(),
                              onOneTapClean: { oneTapClean() },
                              onOpenCategory: { kind in path.append(Route.detail(kind)) },
                              pay: context.pay)
+                .onAppear {
+                    // 需求4：建议页出现时把栈里的扫描页挤掉（home → suggest），
+                    // 点返回直接回首页，不再闪过扫描页。NavigationPath 无数组初始化器
+                    // （iOS 16 只能 value-codable 逐元素 append），用 removeLast 精确弹掉 scan。
+                    if path.count >= 2 {
+                        // 栈形：[home, scan, suggest] → 一次 removeLast 弹 suggest？
+                        // 不行——需要保留 suggest 在栈顶。iOS 16.0+ 无中间删除 API，
+                        // 用 count 检查后整体重建：先弹到只剩 home，再依次 append suggest。
+                        path = NavigationPath()
+                        path.append(Route.suggest)
+                    }
+                }
         case .analysis:
             StorageAnalysisView(onClean: { path.append(Route.suggest) })
         case .detail(let kind):

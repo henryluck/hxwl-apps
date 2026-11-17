@@ -53,6 +53,10 @@ public struct CompressToolView: View {
     @State private var deleteOriginalsOnDone = true
     // 需求3：未开启相册权限点「添加照片/视频」→ 权限提示弹窗（去设置/取消）
     @State private var showAuthAlert = false
+    // 需求2：压缩进度动画 Timer（匀速爬升，完成回调后推到 100% 再切完成页）
+    @State private var progressTimer: Timer?
+    // 需求3：保存成功 toast（「成功：已保存到相册」）
+    @State private var toastText: String?
     @Environment(\.dismiss) private var dismiss
 
     struct DoneState: Equatable {
@@ -129,6 +133,31 @@ public struct CompressToolView: View {
         .overlay {
             if let d = done {
                 doneView(d)
+            }
+        }
+        // 需求3：保存成功 toast（顶部滑入，2.5s 自动消失）
+        .overlay(alignment: .top) {
+            if let toastText {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(CleanPalette.green)
+                    Text(toastText)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 11)
+                .background(Capsule().fill(Color.black.opacity(0.75)))
+                .padding(.top, 64)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .onChange(of: toastText) { t in
+            if t != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    withAnimation(.easeOut(duration: 0.3)) { toastText = nil }
+                }
             }
         }
     }
@@ -282,9 +311,16 @@ public struct CompressToolView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(Color(hex: "6B7078"))
                     Spacer()
+                    // 需求1：修复「重新选择」交互时而失效——
+                    // 原 Button 默认样式在 TabView 手势区内偶发吞点；改 plain 样式 +
+                    // 固定 frame 扩大点击热区（内容尺寸不再影响命中区域）
                     Button("重新选择") { pickerOpen = true }
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(CleanPalette.green)
+                        .buttonStyle(.plain)
+                        .frame(minWidth: 64, minHeight: 32)
+                        .contentShape(Rectangle())
+                        .accessibilityIdentifier("compress.repick")
                 }
                 // Bug表r32：已选内容大图居中展示——单张大图（宽撑满、高 320），
                 // 多张横向滑动逐张查看（TabView 页签式居中翻页），不再 64pt 小缩略图条
@@ -333,12 +369,34 @@ public struct CompressToolView: View {
         guard !CoreFeatureGate.gate(pay) else { return }
         guard !picked.isEmpty, !working else { return }
         working = true
+        // 需求2：进度条动画平滑加载——起步 5% 后 Timer 匀速爬升到 90% 封顶；
+        // 真实压缩完成回调后先推到 100% 再切完成页（不再 5%→直接完成页跳变）
         progressValue = 0.05
+        progressTimer?.invalidate()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { t in
+            Task { @MainActor in
+                if progressValue < 0.9 {
+                    progressValue = min(0.9, progressValue + 0.02)
+                } else {
+                    t.invalidate()
+                }
+            }
+        }
         deleteOriginalsOnDone = true
         Compressor.compress(items: picked, quality: strength.quality) { doneCount, saved, outputIDs in
-            progressValue = 1
-            resultAssetIDs = outputIDs
-            done = DoneState(count: doneCount, saved: saved)
+            progressTimer?.invalidate()
+            progressTimer = nil
+            // 需求2：动画走到 100% 后再进完成页（最短补足 0.6s，肉眼可见走完）
+            let remain = max(0.6, (1.0 - progressValue) * 1.2)
+            withAnimation(.easeInOut(duration: remain)) {
+                progressValue = 1
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + remain + 0.15) {
+                resultAssetIDs = outputIDs
+                done = DoneState(count: doneCount, saved: saved)
+                // 需求3：保存成功 toast（完成页顶部滑入）
+                toastText = "成功：已保存到相册"
+            }
         }
     }
 

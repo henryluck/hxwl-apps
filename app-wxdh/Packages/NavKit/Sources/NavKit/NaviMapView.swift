@@ -20,14 +20,20 @@ public struct AMapNaviViewContainer: UIViewRepresentable {
         case .drive:
             let v = AMapNaviDriveView(frame: .zero)
             v.showUIElements = false   // 用自研 UI 横幅，隐藏官方 UI（保留地图渲染）
+            // 【Bug 行28】显式锁车头朝上：地图随行进方向旋转，与手机朝向一致。
+            // 默认虽为 CarNorth，但用户手动拖图后官方会自动切回正北朝上导致"方向不一致"
+            v.trackingMode = .carNorth
+            v.canChangeTrackingMode = false
             view = v
         case .walk:
             let v = AMapNaviWalkView(frame: .zero)
             v.showUIElements = false
+            v.trackingMode = .carNorth
             view = v
         case .ride:
             let v = AMapNaviRideView(frame: .zero)
             v.showUIElements = false
+            v.trackingMode = .carNorth
             view = v
         }
         onAttached(view)

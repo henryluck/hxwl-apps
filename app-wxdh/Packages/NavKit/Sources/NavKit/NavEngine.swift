@@ -173,14 +173,21 @@ public final class NavEngine: ObservableObject {
         phase = .starting
         defer { startInFlight = false }
 
-        // 实时导航必须从设备真实位置起步；位置不可用直接失败分流
+        // 实时导航必须从设备真实位置起步；位置不可用直接失败分流。
+        // 【Bug 行29】单次定位偶发超时/弱信号（室内边缘常见）会让用户"提示不成功、
+        // 多试几次才能进"——改为失败后自动补一炮（800ms 间隔），两次都失败才报错。
         guard let fix = await location.requestSingleFix(), fix.isUsable else {
-            if !location.authState.isUsable {
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard let retry = await location.requestSingleFix(timeout: 10), retry.isUsable else {
+                if !location.authState.isUsable {
+                    phase = .ready
+                    throw StartFailure.location(location.authState == .servicesOff ? .locationServicesOff : .locationDenied)
+                }
                 phase = .ready
-                throw StartFailure.location(location.authState == .servicesOff ? .locationServicesOff : .locationDenied)
+                throw StartFailure.location(.locationUnavailable)
             }
-            phase = .ready
-            throw StartFailure.location(.locationUnavailable)
+            beginSession(route: route, origin: retry.place, destination: destination)
+            return
         }
 
         beginSession(route: route, origin: fix.place, destination: destination)

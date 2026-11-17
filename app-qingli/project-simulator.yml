@@ -105,6 +105,9 @@ targets:
     deploymentTarget: "16.1"     # Live Activity 最低 16.1
     sources:
       - Widgets
+      # 锁屏卡片 logo 用的 App 图标（CleanLiveActivity.swift 里 Image(named: "appicon")）
+      - path: Widgets/Resources
+        type: group
     info:
       path: Widgets/Info.plist
       properties:

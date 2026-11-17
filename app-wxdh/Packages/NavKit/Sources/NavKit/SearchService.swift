@@ -339,7 +339,9 @@ public final class SearchService: NSObject, ObservableObject {
     /// 地址去掉「中国 + 省 + 市 + 区」前缀，保留可辨认的街道门牌（NAV-09）
     static func cleanAddress(_ raw: String, city: String, district: String) -> String {
         var text = raw
-        for prefix in ["中华人民共和国", "中国"] where text.hasPrefix(prefix) {
+        // 【Bug 行25】MKLocalSearch 对部分地区只返回国名（"中国"/"China"），剥掉后
+        // address 为空 → subtitle 回退 regionLabel（城市+区县），不再显示 "china"
+        for prefix in ["中华人民共和国", "中国", "China", "CHINA", "china"] where text.hasPrefix(prefix) {
             text.removeFirst(prefix.count)
         }
         for part in [city, district] where !part.isEmpty {

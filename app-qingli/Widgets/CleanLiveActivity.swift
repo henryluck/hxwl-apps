@@ -17,16 +17,25 @@ struct CleanLiveActivityView: View {
     var body: some View {
         // 原型布局：第一行 logo + 「温馨提示：」；第二行描述整行可折行；第三行「立即清理」整行胶囊
         VStack(alignment: .leading, spacing: 10) {
-            // 第一行：logo + 标题
+            // 第一行：logo + 标题（logo 用 App 真实图标——appicon.png 已加入本 target 资源）
             HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(brandGreen)
-                    Image(systemName: "trash.slash")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white)
+                if let appIcon = UIImage(named: "appicon") {
+                    Image(uiImage: appIcon)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 34, height: 34)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                } else {
+                    // 兜底：图标资源缺失时回退 SF Symbol
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(brandGreen)
+                        Image(systemName: "trash.slash")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 34, height: 34)
                 }
-                .frame(width: 34, height: 34)
                 Text("温馨提示：")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(brandGreen)

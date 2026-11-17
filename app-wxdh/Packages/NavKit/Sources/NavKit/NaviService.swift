@@ -125,6 +125,9 @@ public final class NaviService: NSObject, ObservableObject {
             m.delegate = self
             m.allowsBackgroundLocationUpdates = true
             m.pausesLocationUpdatesAutomatically = false
+            // 【Bug 行30】self 注册为 dataRepresentative：updateNaviInfo 属 DataRepresentable
+            // 协议（Manager delegate 不回调它），不注册就收不到实时诱导数据
+            m.addDataRepresentative(self)
             if let view = naviView as? AMapNaviDriveView {
                 m.addDataRepresentative(view)
             }
@@ -133,6 +136,7 @@ public final class NaviService: NSObject, ObservableObject {
             m.delegate = self
             m.allowsBackgroundLocationUpdates = true
             m.pausesLocationUpdatesAutomatically = false
+            m.addDataRepresentative(self)
             if let view = naviView as? AMapNaviWalkView {
                 m.addDataRepresentative(view)
             }
@@ -141,6 +145,7 @@ public final class NaviService: NSObject, ObservableObject {
             m.delegate = self
             m.allowsBackgroundLocationUpdates = true
             m.pausesLocationUpdatesAutomatically = false
+            m.addDataRepresentative(self)
             if let view = naviView as? AMapNaviRideView {
                 m.addDataRepresentative(view)
             }
@@ -410,10 +415,30 @@ extension NaviService {
     }
 }
 
-// MARK: - AMapNaviDriveManagerDelegate
+// MARK: - AMapNaviDriveManagerDelegate + 实时诱导数据通道
+// 【Bug 行30·根因】updateNaviInfo 定义在 **DataRepresentable 协议**（AMapNaviDriveDataRepresentable），
+// 不在 ManagerDelegate 协议里——此前 NaviService 只实现了 Manager delegate，
+// updateNaviInfo 从未被回调 → liveInfo 恒 nil → 诱导面板无距离、底部无剩余时距。
+// 修复：NaviService 同时 conform DataRepresentable 协议，configure 时把 self 也注册为
+// dataRepresentative，与官方导航视图并行接收实时数据。
+
+extension NaviService: AMapNaviDriveDataRepresentable {
+    // SDK Swift interface 将 ObjC updateNaviInfo: 映射为 update:（参数 naviInfo）
+    public func driveManager(_ driveManager: AMapNaviDriveManager, update naviInfo: AMapNaviInfo?) {
+        Task { @MainActor in
+            guard let info = naviInfo else { return }
+            self.liveInfo = LiveNaviInfo(currentRoadName: info.currentRoadName ?? "",
+                                         nextRoadName: info.nextRoadName ?? "",
+                                         remainDistance: Int(info.routeRemainDistance),
+                                         remainTime: Int(info.routeRemainTime),
+                                         segmentRemainDistance: Int(info.segmentRemainDistance),
+                                         segmentRemainTime: Int(info.segmentRemainTime),
+                                         iconType: Int(info.iconType.rawValue))
+        }
+    }
+}
 
 extension NaviService: AMapNaviDriveManagerDelegate {
-
     public func driveManager(_ driveManager: AMapNaviDriveManager, onCalculateRouteSuccessWith type: AMapNaviRoutePlanType, calculateRouteResult: AMapNaviCalculateRouteResult) {
         Task { @MainActor in
             Log.info("[NaviSDK] 驾车算路成功")
@@ -436,18 +461,8 @@ extension NaviService: AMapNaviDriveManagerDelegate {
         }
     }
 
-    public func driveManager(_ driveManager: AMapNaviDriveManager, updateNaviInfo naviInfo: AMapNaviInfo?) {
-        Task { @MainActor in
-            guard let info = naviInfo else { return }
-            self.liveInfo = LiveNaviInfo(currentRoadName: info.currentRoadName ?? "",
-                                         nextRoadName: info.nextRoadName ?? "",
-                                         remainDistance: Int(info.routeRemainDistance),
-                                         remainTime: Int(info.routeRemainTime),
-                                         segmentRemainDistance: Int(info.segmentRemainDistance),
-                                         segmentRemainTime: Int(info.segmentRemainTime),
-                                         iconType: Int(info.iconType.rawValue))
-        }
-    }
+    // 【Bug 行30】updateNaviInfo 已迁到 AMapNaviDriveDataRepresentable extension（415 行附近）：
+    // 它属于 DataRepresentable 协议而非 ManagerDelegate，原来写在这里从未被回调。
 
     public func driveManager(_ driveManager: AMapNaviDriveManager, update gpsSignalStrength: AMapNaviGPSSignalStrength) {
         Task { @MainActor in
@@ -503,18 +518,7 @@ extension NaviService: AMapNaviWalkManagerDelegate {
         Task { @MainActor in self.handleTTS(soundString) }
     }
 
-    public func walkManager(_ walkManager: AMapNaviWalkManager, updateNaviInfo naviInfo: AMapNaviInfo?) {
-        Task { @MainActor in
-            guard let info = naviInfo else { return }
-            self.liveInfo = LiveNaviInfo(currentRoadName: info.currentRoadName ?? "",
-                                         nextRoadName: info.nextRoadName ?? "",
-                                         remainDistance: Int(info.routeRemainDistance),
-                                         remainTime: Int(info.routeRemainTime),
-                                         segmentRemainDistance: Int(info.segmentRemainDistance),
-                                         segmentRemainTime: Int(info.segmentRemainTime),
-                                         iconType: Int(info.iconType.rawValue))
-        }
-    }
+    // 【Bug 行30】walkManager:updateNaviInfo: 属 DataRepresentable 协议，迁移见文件底部
 
     public func walkManager(_ walkManager: AMapNaviWalkManager, update gpsSignalStrength: AMapNaviGPSSignalStrength) {
         Task { @MainActor in self.gpsSignal = Int(gpsSignalStrength.rawValue) }
@@ -558,18 +562,7 @@ extension NaviService: AMapNaviRideManagerDelegate {
         Task { @MainActor in self.handleTTS(soundString) }
     }
 
-    public func rideManager(_ rideManager: AMapNaviRideManager, updateNaviInfo naviInfo: AMapNaviInfo?) {
-        Task { @MainActor in
-            guard let info = naviInfo else { return }
-            self.liveInfo = LiveNaviInfo(currentRoadName: info.currentRoadName ?? "",
-                                         nextRoadName: info.nextRoadName ?? "",
-                                         remainDistance: Int(info.routeRemainDistance),
-                                         remainTime: Int(info.routeRemainTime),
-                                         segmentRemainDistance: Int(info.segmentRemainDistance),
-                                         segmentRemainTime: Int(info.segmentRemainTime),
-                                         iconType: Int(info.iconType.rawValue))
-        }
-    }
+    // 【Bug 行30】rideManager:updateNaviInfo: 属 DataRepresentable 协议，迁移见文件底部
 
     public func rideManager(_ rideManager: AMapNaviRideManager, update gpsSignalStrength: AMapNaviGPSSignalStrength) {
         Task { @MainActor in self.gpsSignal = Int(gpsSignalStrength.rawValue) }
@@ -585,6 +578,38 @@ extension NaviService: AMapNaviRideManagerDelegate {
             self.isNavigating = false
             self.liveInfo = nil
             self.onArrived?()
+        }
+    }
+}
+
+// MARK: - 步行/骑行实时诱导数据通道（DataRepresentable 协议，【Bug 行30】）
+
+extension NaviService: AMapNaviWalkDataRepresentable {
+    public func walkManager(_ walkManager: AMapNaviWalkManager, update naviInfo: AMapNaviInfo?) {
+        Task { @MainActor in
+            guard let info = naviInfo else { return }
+            self.liveInfo = LiveNaviInfo(currentRoadName: info.currentRoadName ?? "",
+                                         nextRoadName: info.nextRoadName ?? "",
+                                         remainDistance: Int(info.routeRemainDistance),
+                                         remainTime: Int(info.routeRemainTime),
+                                         segmentRemainDistance: Int(info.segmentRemainDistance),
+                                         segmentRemainTime: Int(info.segmentRemainTime),
+                                         iconType: Int(info.iconType.rawValue))
+        }
+    }
+}
+
+extension NaviService: AMapNaviRideDataRepresentable {
+    public func rideManager(_ rideManager: AMapNaviRideManager, update naviInfo: AMapNaviInfo?) {
+        Task { @MainActor in
+            guard let info = naviInfo else { return }
+            self.liveInfo = LiveNaviInfo(currentRoadName: info.currentRoadName ?? "",
+                                         nextRoadName: info.nextRoadName ?? "",
+                                         remainDistance: Int(info.routeRemainDistance),
+                                         remainTime: Int(info.routeRemainTime),
+                                         segmentRemainDistance: Int(info.segmentRemainDistance),
+                                         segmentRemainTime: Int(info.segmentRemainTime),
+                                         iconType: Int(info.iconType.rawValue))
         }
     }
 }

@@ -717,26 +717,43 @@ public struct PhotoRepairView: View {
         guard !CoreFeatureGate.gate(pay) else { return }
         guard let source = original, !working else { return }
         working = true
-        progress = 0.08
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { t in
+        // 需求2：进度条动画固定节奏跑 1.6s 到 90%，真实完成回调后推到 100% 并
+        // 停留 0.25s 再展示结果（不再一闪而过 / 未走完就跳过）
+        let startedAt = Date()
+        progress = 0.05
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { t in
             Task { @MainActor in
-                if progress < 0.9 { progress += 0.06 } else { t.invalidate() }
+                // 匀速：0.05s 一步 → 1.6s 走到 0.9
+                if progress < 0.9 { progress = min(0.9, progress + 0.028) } else { t.invalidate() }
             }
         }
         DispatchQueue.global(qos: .userInitiated).async {
             let enhanced = ImageToolEngine.enhance(source)
             DispatchQueue.main.async {
                 timer.invalidate()
-                progress = 1
-                working = false
-                guard let enhanced else {
-                    notice = "这张照片无法处理，请换一张试试"; return
+                // 补足动画：不足 1.6s 就等剩余时长，再走完最后一段到 100%
+                let elapsed = Date().timeIntervalSince(startedAt)
+                let settle = max(0, 1.6 - elapsed)
+                let finish = { () -> Void in
+                    withAnimation(.easeOut(duration: 0.25)) { self.progress = 1 }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        self.working = false
+                        self.progress = 0
+                        guard let enhanced else {
+                            self.notice = "这张照片无法处理，请换一张试试"; return
+                        }
+                        self.result = enhanced
+                        self.showOriginal = false
+                        ImageToolEngine.saveJPEG(enhanced) { ok in
+                            self.saved = ok
+                            if !ok { self.notice = "保存失败，请在系统设置中允许访问相册" }
+                        }
+                    }
                 }
-                result = enhanced
-                showOriginal = false
-                ImageToolEngine.saveJPEG(enhanced) { ok in
-                    saved = ok
-                    if !ok { notice = "保存失败，请在系统设置中允许访问相册" }
+                if settle > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + settle, execute: finish)
+                } else {
+                    finish()
                 }
             }
         }
@@ -898,23 +915,37 @@ public struct PhotoCutoutView: View {
         guard !CoreFeatureGate.gate(pay) else { return }
         guard let source = original, !working else { return }
         working = true
-        progress = 0.08
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { t in
+        // 需求2：同修复页——进度动画固定节奏跑 1.6s 到 90%，完成回调补足到 100% 后出结果
+        let startedAt = Date()
+        progress = 0.05
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { t in
             Task { @MainActor in
-                if progress < 0.9 { progress += 0.05 } else { t.invalidate() }
+                if progress < 0.9 { progress = min(0.9, progress + 0.028) } else { t.invalidate() }
             }
         }
         ImageToolEngine.cutout(source) { cut in
             timer.invalidate()
-            progress = 1
-            working = false
-            guard let cut else {
-                notice = "未能识别出主体，请换一张主体清晰的照片"; return
+            let elapsed = Date().timeIntervalSince(startedAt)
+            let settle = max(0, 1.6 - elapsed)
+            let finish = { () -> Void in
+                withAnimation(.easeOut(duration: 0.25)) { self.progress = 1 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    self.working = false
+                    self.progress = 0
+                    guard let cut else {
+                        self.notice = "未能识别出主体，请换一张主体清晰的照片"; return
+                    }
+                    self.result = cut
+                    ImageToolEngine.savePNG(cut) { ok in
+                        self.saved = ok
+                        if !ok { self.notice = "保存失败，请在系统设置中允许访问相册" }
+                    }
+                }
             }
-            result = cut
-            ImageToolEngine.savePNG(cut) { ok in
-                saved = ok
-                if !ok { notice = "保存失败，请在系统设置中允许访问相册" }
+            if settle > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + settle, execute: finish)
+            } else {
+                finish()
             }
         }
     }
@@ -1065,8 +1096,10 @@ public struct LivePhotoToStillView: View {
             .safeAreaInset(edge: .bottom) {
                 ToolPrimaryButton(working ? "正在转换…" : "转为静态\(selected.isEmpty ? "" : "（\(selected.count)）")",
                                   enabled: !working && !selected.isEmpty) { convert() }
+                    // 需求1：白底与上方内容（已选提示文字）重叠 → 白底整体上移 5pt 让出间隙
                     .padding(.bottom, 14)
                     .background(Color.white.opacity(0.92))
+                    .offset(y: -5)
             }
         }
         .navigationBarHidden(true)

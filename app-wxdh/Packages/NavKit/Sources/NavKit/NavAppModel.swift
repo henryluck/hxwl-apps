@@ -136,7 +136,22 @@ public final class NavAppModel: ObservableObject {
                 .sink { [weak self] _ in self?.objectWillChange.send() }
                 .store(in: &childCancellables)
         }
+        // 【Bug 行31】授权变可用 → 自动定位一次（覆盖两个场景）：
+        // ① 权限弹窗用户点「允许」后立即定位，无需再手动点；② 启动时已有权限、
+        // 但首页 .task 在 splash/订阅墙期间已空跑（authState 尚未刷新）的情况——
+        // 授权状态晚到时由这里补一次自动定位。每会话只补一次，不覆盖用户手动挪图。
+        location.$authState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self, state.isUsable, !self.autoLocatedAfterAuth else { return }
+                self.autoLocatedAfterAuth = true
+                Task { await self.locate() }
+            }
+            .store(in: &childCancellables)
     }
+
+    /// 【Bug 行31】授权后自动定位只执行一次的标记
+    private var autoLocatedAfterAuth = false
 
     private var childCancellables: Set<AnyCancellable> = []
 
@@ -188,8 +203,12 @@ public final class NavAppModel: ObservableObject {
     public func locate() async {
         locating = true
         defer { locating = false }
+        // 【Bug 行31】notDetermined 时等待用户对权限弹窗做出选择（此前只发非阻塞
+        // requestAuthorization 就立刻去 requestSingleFix——权限未决恒 nil，
+        // 用户点「允许」后也没了下文，表现为"授权完不自动定位"）。
         if location.authState == .notDetermined {
-            location.requestAuthorization()
+            let granted = await location.waitForAuthorization()
+            guard granted else { return }
         }
         if let fix = await location.requestSingleFix() {
             // 首页定位：落到设备附近（近距跟随只在活动导航里用）
@@ -352,10 +371,17 @@ public final class NavAppModel: ObservableObject {
 
     /// 规划在途标记：并发调用 plan()（openPlan/页面 task/重试）时只放行第一个
     private var planInFlight = false
+    /// 【Bug 行27】在途期间有新模式切换进来 → 置位，本轮结束后自动补一轮最新模式的规划
+    private var planPendingRerun = false
 
     public func plan() async {
         guard let destination else { return }
-        guard !planInFlight else { return }   // 在途不重入（模式切换/重试会在上一轮结束后再发）
+        // 【Bug 行27】在途不重入，但**记录补跑请求**：切换出行方式时 UI 模式已变，
+        // 若直接 return 用户会看到「模式换了、路线没换」。在途结束后补一轮最新模式。
+        if planInFlight {
+            planPendingRerun = true
+            return
+        }
         planInFlight = true
         defer { planInFlight = false }
         // 起点优先用户手选；否则用当前有效位置（无新鲜缓存时取一次真实定位，不拿 0,0 算路）
@@ -392,6 +418,11 @@ public final class NavAppModel: ObservableObject {
         if let route = engine.selectedRoute {
             mapController.showRoute(route.polyline, origin: originPlace, destination: destination)
             mapController.fitRoute()
+        }
+        // 【Bug 行27】在途期间有模式切换请求 → 用最新模式补跑一轮
+        if planPendingRerun {
+            planPendingRerun = false
+            await plan()
         }
     }
 

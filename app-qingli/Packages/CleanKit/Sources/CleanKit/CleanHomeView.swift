@@ -260,7 +260,9 @@ public struct CleanHomeView: View {
     private var gaugeCardInner: some View {
         VStack(spacing: 14) {
             if scanning {
-                ScanningIndicator(label: CleanScanner.shared.phaseLabel)
+                // 需求2/3：扫描进度数字 0%→100% 动态累加、顺时针环形走满一圈
+                ScanningIndicator(label: CleanScanner.shared.phaseLabel,
+                                  progress: CleanScanner.shared.progress)
                     .padding(.vertical, 26)
             } else {
                 scoreRow
@@ -469,11 +471,12 @@ struct StorageGauge: View {
 
     // 三段效果（用户指定）：第一段红→黄渐变，第二段黄→绿渐变，第三段纯绿
     // 用户反馈红黄太浅 → 加深（红 E53935→C62828，黄 FDD835→F9A825）
-    private let seg1Start = Color(hex: "C62828")   // 深红
-    private let seg1End = Color(hex: "F9A825")     // 深黄（琥珀）
-    private let seg2Start = Color(hex: "F9A825")   // 深黄（琥珀）
-    private let seg2End = Color(hex: "2E7D32")     // 深绿
-    private let seg3 = Color(hex: "43A047")        // 纯绿（保持不变）
+    // 再次反馈「条形参数颜色太浅，重一点」→ 全段再加深 + 未激活段透明度 0.35→0.55
+    private let seg1Start = Color(hex: "B71C1C")   // 更深红
+    private let seg1End = Color(hex: "E65100")     // 更深橙
+    private let seg2Start = Color(hex: "E65100")   // 深橙
+    private let seg2End = Color(hex: "1B5E20")     // 更深绿
+    private let seg3 = Color(hex: "2E7D32")        // 深绿
 
     var body: some View {
         GeometryReader { geo in
@@ -497,21 +500,21 @@ struct StorageGauge: View {
                         LinearGradient(colors: [seg1Start, seg1End],
                                        startPoint: .leading, endPoint: .trailing)
                     } dimmed: {
-                        LinearGradient(colors: [seg1Start, seg1End].map { $0.opacity(0.35) },
+                        LinearGradient(colors: [seg1Start, seg1End].map { $0.opacity(0.55) },
                                        startPoint: .leading, endPoint: .trailing)
                     }
                     segment(active: ratio >= 0.5 && ratio < 0.8) {
                         LinearGradient(colors: [seg2Start, seg2End],
                                        startPoint: .leading, endPoint: .trailing)
                     } dimmed: {
-                        LinearGradient(colors: [seg2Start, seg2End].map { $0.opacity(0.35) },
+                        LinearGradient(colors: [seg2Start, seg2End].map { $0.opacity(0.55) },
                                        startPoint: .leading, endPoint: .trailing)
                     }
                     segment(active: ratio < 0.5) {
                         LinearGradient(colors: [seg3, seg3],
                                        startPoint: .leading, endPoint: .trailing)
                     } dimmed: {
-                        LinearGradient(colors: [seg3.opacity(0.35), seg3.opacity(0.35)],
+                        LinearGradient(colors: [seg3.opacity(0.55), seg3.opacity(0.55)],
                                        startPoint: .leading, endPoint: .trailing)
                     }
                 }
@@ -550,10 +553,12 @@ struct StorageGauge: View {
     }
 }
 
-// MARK: - 扫描中指示器
+// MARK: - 扫描中指示器（数字从 0% 累加到 100% + 顺时针环形进度）
 
 struct ScanningIndicator: View {
     let label: String
+    /// 0~1 显示进度（驱动百分比数字与环形进度，扫描完成时到达 1 → 100%）
+    let progress: Double
     @State private var spin = false
 
     var body: some View {
@@ -561,13 +566,21 @@ struct ScanningIndicator: View {
             ZStack {
                 Circle()
                     .stroke(CleanPalette.greenPale, lineWidth: 6)
+                // 进度弧：顺时针（0° 起点在顶部，trim 方向即顺时针），扫描结束走满一圈
                 Circle()
-                    .trim(from: 0, to: 0.28)
+                    .trim(from: 0, to: CGFloat(min(max(progress, 0), 1)))
                     .stroke(CleanPalette.green, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                    .rotationEffect(.degrees(spin ? 360 : 0))
-                    .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.3), value: progress)
             }
             .frame(width: 52, height: 52)
+            .overlay(
+                // 环心小百分比
+                Text("\(Int((min(max(progress, 0), 1) * 100).rounded()))%")
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color(hex: "2F6E5D"))
+            )
             Text(label.isEmpty ? "正在扫描…" : label)
                 .font(.system(size: 14))
                 .foregroundStyle(Color(hex: "6B7078"))
