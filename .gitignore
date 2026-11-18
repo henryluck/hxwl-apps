@@ -33,3 +33,7 @@ data/
 .DS_Store
 Thumbs.db
 keys/
+
+# 大体积媒体文件不入库（服务器直传）
+app/static/**/*.mp4
+app/static/**/*.webm

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="垃圾清理助手隐私政策，说明个人信息处理规则、权限使用、第三方SDK及用户权利。">
+<title>垃圾清理助手 - 隐私政策</title>
+<style>
+:root{--primary:#2A5240;--text:#263238;--muted:#667085;--line:#e7ece9;--soft:#f5f8f6}
+*{box-sizing:border-box}
+body{margin:0;padding:24px 16px 48px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;line-height:1.85;color:var(--text);background:#fff}
+main{max-width:900px;margin:0 auto}
+h1{text-align:center;font-size:26px;line-height:1.4;margin:8px 0 10px;color:#182d24}
+.effective-date{text-align:center;color:var(--muted);font-size:14px;margin-bottom:30px}
+h2{font-size:20px;margin:32px 0 12px;padding-left:12px;border-left:4px solid var(--primary);line-height:1.5}
+h3{font-size:17px;margin:22px 0 8px}
+p{margin:0 0 12px}
+ul,ol{padding-left:24px;margin:8px 0 16px}
+li{margin:0 0 8px}
+.note{background:var(--soft);border:1px solid #e1ebe5;border-radius:8px;padding:14px 16px;margin:16px 0}
+.sdk-item{border:1px solid var(--line);border-radius:8px;padding:16px;margin:12px 0;background:#fff;overflow-wrap:anywhere}
+.sdk-item p{margin:4px 0}
+a{color:var(--primary);overflow-wrap:anywhere}
+strong{font-weight:650}
+.footer-tip{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+@media(max-width:600px){body{padding:18px 14px 36px}h1{font-size:23px}h2{font-size:19px}}
+@media print{body{padding:0}a{color:inherit;text-decoration:none}.note,.sdk-item{break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<h1>垃圾清理助手隐私政策</h1>
+<div class="effective-date">生效日期：2026年11月15日</div>
+<p>欢迎使用<strong>垃圾清理助手</strong>（下称“本App”），本App由<strong>广州焕曦网络科技有限公司</strong>（下称“我们”）开发并运营。</p>
+<p>本隐私政策旨在向您清晰说明，在使用垃圾清理助手各项功能时，我们如何收集、存储、使用、保护您的个人信息，同时说明系统权限调用规则、第三方组件的数据处理行为以及您所享有的隐私权益。
+使用本App即代表您已阅读并理解本隐私政策。针对部分敏感的数据处理行为，我们会通过弹窗提示单独征得您的许可；您拒绝授予非必要权限，仅会造成对应功能不可用，不会影响App基础服务的正常体验。</p>
+
+<h2>一、适用范围</h2>
+<p>1. 本隐私政策仅适用于「垃圾清理助手」移动端App及App内置全部原生服务。</p>
+<p>2. 若您在App内跳转至外部第三方平台、网页、其他应用，该类外部服务的数据处理行为由第三方自行负责，请您查阅对应第三方的隐私声明，我们不对第三方的信息安全承担责任。</p>
+
+<h2>二、您的个人信息权利</h2>
+<p>依据个人信息保护相关法律，您有权行使查阅、复制、更正、删除相关个人信息，撤回授权、要求解释数据处理规则等权利。</p>
+<p>由于本App不存在账号系统，提交权利申请时，需要您通过联系邮箱辅助核验设备身份。</p>
+<p>您发送邮件提交申请后，我们会在法律规定时限内予以答复；对于法律规定无需受理、无法定位到对应信息的请求，我们有权说明理由后不予处理。</p>
+
+<h2>三、我们如何收集与使用信息</h2>
+<p>本App<strong>无需注册、登录账号</strong>，不会创建用户账号体系。我们坚持“最小够用”原则，仅为达成对应功能目标才会处理相关信息，不会超范围采集用户数据。</p>
+
+<h3>3.1 设备与运行状态信息</h3>
+<p>为保障App稳定运行、适配不同手机机型、排查闪退、卡顿等异常故障，我们会采集必要的设备运行信息，包括设备硬件型号、操作系统版本、垃圾清理助手App版本、网络状态、设备识别标识、崩溃报错日志。</p>
+<p>提示：上述信息仅用于产品运维、问题排查，不会用于商业画像、定向推送以外的无关用途，具体采集项受SDK配置与系统权限约束。</p>
+
+<h3>3.2 多媒体文件处理（相册清理、图片视频压缩、照片修复、智能抠图）</h3>
+<p>本App核心能力包含相册垃圾清理、图片/视频压缩、老照片修复、智能抠图，上述功能均需要访问您设备本地相册与存储。</p>
+<ul>
+<li>在您主动触发操作前，App不会读取相册里的图片、视频；仅当您手动选择图片/视频素材后，才会读取对应媒体文件。</li>
+<li><strong>图片、视频优先本地运算处理</strong>：压缩、抠图、相册清理绝大多数运算均在您本机完成。仅部分AI增强修复场景，在获得您主动确认后，选中的素材才会上传服务端运算；未经您确认，原始媒体文件不会上传服务器。</li>
+<li>经过处理后的图片、视频成品文件，全部保存至您的手机本地相册，由您自主管理，我们不会留存您的原图、处理后的成品。</li>
+<li>如果您在系统设置关闭相册/存储权限，则相册清理、压缩、照片修复、智能抠图功能将无法执行，其余不受存储权限约束的功能仍可以正常使用。</li>
+</ul>
+
+<h3>3.3 App所需系统权限说明</h3>
+<p>本App不会申请未使用的权限，每一项权限均对应明确业务场景，您随时可以在手机系统设置关闭授权：</p>
+<ul>
+<li><strong>相册与存储权限</strong>：读取相册媒体，完成垃圾相册清理、图片视频压缩、照片修复、智能抠图，并将处理完成的文件保存回本地相册；</li>
+<li><strong>网络权限</strong>：用于获取产品配置信息、版本更新校验、加载广告内容、上报故障日志；网络访问不等于读取您本地相册资料；</li>
+<li><strong>相机权限</strong>：本App如上线拍照相关功能才会申请，若无该业务场景，则绝不发起该权限申请；</li>
+<li><strong>iOS广告追踪权限（ATT）</strong>：iOS系统下，如果需要获取广告标识符用于广告优化，会遵循苹果ATT框架向您弹窗征询许可；您拒绝后将不再获取IDFA，但依旧会展示普通广告；</li>
+<li><strong>消息通知权限</strong>：若产品上线通知提醒功能，会向您告知用途后再申请授权，您可随时关闭；</li>
+<li><strong>其他权限</strong>：如后续新增功能需要额外设备权限，会向您说明用途再申请授权。</li>
+</ul>
+<p>您撤回权限，不会否定此前在合法授权下已经完成的数据处理行为，只会影响后续功能使用。</p>
+
+<h3>3.4 用户主动提交反馈信息</h3>
+<p>当您通过官方邮箱向我们反馈bug、提出产品建议、发起咨询投诉时，您可能自愿提供邮箱地址、问题截图、文字描述。</p>
+<p>该类信息仅用于对接处理您的诉求，问题闭环完成后，会按照合规周期进行清理，不会挪作其他营销用途。</p>
+
+<h3>3.5 法定豁免收集情形</h3>
+<p>根据法律法规，发生以下情形，我们可以在无需再次征得您同意的前提下处理个人信息：</p>
+<ul>
+<li>为履行双方约定服务所必需；</li>
+<li>履行法定职责、法定义务；</li>
+<li>发生紧急危难情况，为保护自然人生命财产安全；</li>
+<li>处理您已经自行对外公开的合法信息；</li>
+<li>法律、行政法规明确许可的其他情形。</li>
+</ul>
+
+<h2>四、第三方SDK组件说明</h2>
+<p>为实现数据统计、广告变现、反作弊风控，本App集成若干第三方软件开发工具包（SDK）。第三方SDK会按照其自身隐私政策收集部分设备相关信息。</p>
+<p>重要提示：App迭代升级时，如果SDK发生新增、下线，我们会同步更新本隐私政策。下面清单以实际打包版本为准，请同时查阅第三方官方隐私协议。</p>
+
+<div class="sdk-item">
+<p><strong>1. 友盟统计SDK</strong></p>
+<p>服务方：北京锐讯灵通科技有限公司</p>
+<p>用途：统计App使用行为，分析产品体验，辅助版本迭代优化</p>
+<p>处理信息：设备型号、系统版本、网络环境、设备标识、App操作日志（以SDK实际配置为准）</p>
+<p>隐私链接：<a href="https://www.umeng.com/page/policy" target="_blank" rel="noopener noreferrer">https://www.umeng.com/page/policy</a></p>
+</div>
+
+<div class="sdk-item">
+<p><strong>2. 穿山甲广告SDK</strong></p>
+<p>服务方：北京巨量引擎网络技术有限公司</p>
+<p>用途：提供广告请求、广告展示、广告投放效果统计</p>
+<p>处理信息：设备软硬件参数、网络信息、IP地址、广告交互行为记录（以SDK实际配置为准）</p>
+<p>隐私链接：<a href="https://www.csjplatform.com/privacy" target="_blank" rel="noopener noreferrer">https://www.csjplatform.com/privacy</a></p>
+</div>
+
+<div class="sdk-item">
+<p><strong>3. 广点通广告SDK</strong></p>
+<p>服务方：深圳市腾讯计算机系统有限公司</p>
+<p>用途：广告请求展示、广告归因统计</p>
+<p>处理信息：设备硬件信息、网络信息、IP、广告点击曝光记录（以SDK实际配置为准）</p>
+<p>隐私链接：<a href="https://datanexus.qq.com/doc/develop/compliance/android/privacy_policy" target="_blank" rel="noopener noreferrer">https://datanexus.qq.com/doc/develop/compliance/android/privacy_policy</a></p>
+</div>
+
+<div class="sdk-item">
+<p><strong>4. 数盟SDK</strong></p>
+<p>服务方：北京数字联盟网络科技有限公司</p>
+<p>用途：识别设备真伪，防范作弊行为，广告渠道效果归因</p>
+<p>处理信息：设备型号、系统版本、设备标识、软硬件环境参数（以SDK实际配置为准）</p>
+<p>隐私链接：<a href="https://www.shuzilm.cn/privacy" target="_blank" rel="noopener noreferrer">https://www.shuzilm.cn/privacy</a></p>
+</div>
+
+<h2>五、数据存储与安全保障</h2>
+<h3>5.1 存储期限与存放位置</h3>
+<ul>
+<li>对于我们收集到的设备、运行日志类信息，仅保留至业务目的实现为止；到期后做删除或匿名化处理；法律强制留存的情形除外。</li>
+<li>用户的图片、视频素材绝大多数保存在您手机本地；仅AI增强修复场景，经您确认才临时上传服务器，任务处理结束后服务端会及时删除对应素材，不会永久留存原图。</li>
+<li>若未来业务发生个人信息跨境传输，我们会严格按照国内法规完成出境相关流程并向用户告知。</li>
+</ul>
+
+<h3>5.2 安全防护措施</h3>
+<p>我们从技术层面和管理制度层面落实信息安全保护，包含访问权限管控、数据传输加密、内部人员保密约束、安全事件处置流程。</p>
+<p>互联网环境无法做到绝对安全，如果发生个人信息安全事件，我们会依法处置，必要时通知受影响用户以及监管主管部门。</p>
+
+<h2>六、信息对外共享、转移与公开披露</h2>
+<ul>
+<li><strong>信息共享</strong>：除本政策写明的第三方SDK合作、法定要求外，我们不会向无关第三方流转您的个人信息。确需委托第三方处理数据，会签署数据保护协议，做好数据安全约束。</li>
+<li><strong>业务变更转移</strong>：当发生公司合并、分立、清算等业务变更，个人信息随之移交承接方；我们会要求承接方继续遵守本隐私政策义务，如果承接方打算变更数据用途，需要重新获取您的许可。</li>
+<li><strong>公开披露</strong>：没有获得您明确单独同意，我们不会对外公开您的个人信息；司法、行政机关依法出具文书调取数据，我们将遵照法律要求予以配合。</li>
+</ul>
+
+<h2>七、本地缓存与消息通知</h2>
+<ul>
+<li><strong>本地缓存数据</strong>：App会在本机存储功能配置、运行缓存，您可以通过手机系统设置清除App数据。卸载App会清除App自身本地缓存，但不会清除第三方SDK已经收集保存的数据。</li>
+<li><strong>消息通知</strong>：如本App开启通知推送功能，所有营销类通知均可在系统设置关闭；不会将营销消息伪装成系统强制必需通知。</li>
+</ul>
+
+<h2>八、未成年人使用提示</h2>
+<p>本App面向成年用户设计使用。未满18周岁的未成年人，请务必在监护人阅读本隐私政策并且取得监护人许可后使用本产品。</p>
+<p>针对未满14周岁儿童的个人信息，我们按照敏感个人信息标准进行保护，必要时需要监护人授权。监护人如需查询、删除未成年人相关信息，可以使用官方联系邮箱发起申请。</p>
+
+<h2>九、隐私政策修订更新</h2>
+<p>随着产品迭代、国家法律法规更新，我们有权对本隐私政策进行修订。更新后的版本会标注新的生效日期，并在App内展示。</p>
+<p>如果更新内容涉及收集信息种类、处理用途、处理方式等重大变更，且法律要求重新获取用户许可，我们会弹窗取得您的新同意。单纯继续使用App，不视作您自动接受重大变更后的隐私条款。</p>
+
+<h2>十、联系渠道</h2>
+<p>若您对本隐私政策内容存有疑问，或是需要行使个人信息相关权利、反馈产品使用过程中遇到的隐私相关问题，欢迎通过电子邮件方式与我们取得联系。</p>
+<ul>
+<li><strong>运营主体</strong>：广州焕曦网络科技有限公司</li>
+<li><strong>联系邮箱</strong>：<a href="mailto:developer@gzhuanxiwl.com">developer@gzhuanxiwl.com</a></li>
+</ul>
+<p>为保障您的诉求可以高效处理，请在邮件中说明App名称、问题详情；如为行使个人信息权利，请同步描述设备相关信息用于身份核验。请不要在邮件内附带身份证、私人照片等敏感个人资料，避免信息泄露风险。</p>
+
+</main>
+</body>
+</html>
