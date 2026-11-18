@@ -27,24 +27,27 @@ func hasLegalContent(url: URL?, html: String?) -> Bool {
     isConfiguredPolicyURL(url) || (html?.isEmpty == false)
 }
 
-/// 合规文档展示（需求：显示 URL 内容，App 缓存一份，URL 不可达时显示缓存）：
-///   打开即渲染（缓存 → 兜底正文），后台拉 URL 最新内容无感刷新。
-///   URL 完全不可用且无任何内容 → 回退应用内 Safari（旧行为兜底）。
+/// 合规文档展示（需求：直接打开 URL；网络不可达时显示 App 内缓存文件）：
+///   ① 在线可达 → SFSafariViewController 直接打开在线页（样式与线上完全一致）
+///   ② 不可达 → App 内渲染磁盘缓存（此前在线访问成功时落盘的内容）
+///   ③ 无缓存（首次离线）→ spec 打包兜底正文（并落盘，之后离线也有缓存）
 struct LegalDocSheet: View {
     let kind: LegalKind
     let url: URL?
     let html: String?
 
-    @State private var content: String?
+    /// nil = 探测中；true = 在线可达（Safari 直出）；false = 离线（缓存渲染）
+    @State private var online: Bool?
+    @State private var offlineContent: String?
 
     var body: some View {
         Group {
-            if isConfiguredPolicyURL(url), content == nil, (html?.isEmpty != false) {
-                // 极端场景：URL 有效但缓存与兜底都为空 → 先用 Safari 打开（网络可达时直出）
-                SafariSheet(url: url!)
-            } else {
+            switch online {
+            case .some(true) where url != nil:
+                SafariSheet(url: url!)   // 应用内直接打开在线页
+            default:
                 NavigationStack {
-                    LegalDocView(title: kind.title, html: content ?? "")
+                    LegalDocView(title: kind.title, html: offlineContent ?? html ?? "")
                         .navigationTitle(kind.title)
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
@@ -56,14 +59,15 @@ struct LegalDocSheet: View {
             }
         }
         .task {
-            // 三级兜底：远程 URL（成功即刷新缓存）→ 磁盘缓存 → spec 打包正文
-            await LegalDocFetcher.fetchAsync(kind: legalKindMapping,
-                                             urlString: url?.absoluteString,
-                                             fallbackHTML: html) { fresh, _ in
-                if let fresh, !fresh.isEmpty { content = fresh }
+            // 离线内容先备好（磁盘缓存 → spec 兜底），探测失败立即渲染
+            if let cached = LegalDocFetcher.readCached(kind: legalKindMapping) {
+                offlineContent = cached
+            } else if let html, !html.isEmpty {
+                offlineContent = html
+                LegalDocFetcher.warmCache(kind: legalKindMapping, html: html)   // 兜底落盘
             }
-            // 打开瞬间先用兜底渲染（不等网络）
-            if content == nil, let html, !html.isEmpty { content = html }
+            // 在线探测：可达 → 顺便把最新内容刷进缓存（下次离线用）
+            online = await LegalDocFetcher.probeAndRefreshCache(url: url, kind: legalKindMapping)
         }
     }
 
@@ -72,19 +76,6 @@ struct LegalDocSheet: View {
     }
 
     @Environment(\.dismiss) private var dismiss
-}
-
-private extension LegalDocFetcher {
-    /// async 包装（sheet .task 里顺序执行：先秒开兜底，再等远程结果）
-    static func fetchAsync(kind: LegalDoc.Kind, urlString: String?, fallbackHTML: String?,
-                           completion: @escaping (String?, Bool) -> Void) async {
-        await withCheckedContinuation { cont in
-            fetch(kind: kind, urlString: urlString, fallbackHTML: fallbackHTML) { html, fromCache in
-                completion(html, fromCache)
-                cont.resume()
-            }
-        }
-    }
 }
 
 /// SFSafariViewController 包装：应用内浏览在线政策页，右上角「完成」收起

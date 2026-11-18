@@ -227,9 +227,13 @@ public struct ProtoPaywallView: View {
                 do {
                     try await pay.purchase()
                     if pay.isPro {
-                        // 购买成功 → 壳层统一展示「完成订阅页」（不再是「订阅成功」弹窗）
-                        ProtoSubscriptionFlow.notifySuccess()
+                        // 购买成功 → 先收起订阅墙（fullScreenCover dismiss 动画约 0.3s），
+                        // 再发通知让壳层展示「完成订阅页」——同步发通知时 cover 还在屏幕上，
+                        // ZStack 里的 success view 会被 cover 遮住看不到。
                         closePaywall()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            ProtoSubscriptionFlow.notifySuccess()
+                        }
                     }
                 } catch {
                     purchaseError = error.payUserMessage
@@ -741,8 +745,11 @@ public struct ProtoFlashSaleView: View {
             if pay.isPro {
                 hasPurchasedRetention = true
                 onClose()
-                // 挽留页购买成功同样进入「完成订阅页」（与主订阅墙一致）
-                ProtoSubscriptionFlow.notifySuccess()
+                // 挽留页购买成功同样进入「完成订阅页」（与主订阅墙一致）。
+                // 等 onClose 的关闭动画走完一帧再发通知，确保 ZStack 层级干净。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    ProtoSubscriptionFlow.notifySuccess()
+                }
             }
         }
     }

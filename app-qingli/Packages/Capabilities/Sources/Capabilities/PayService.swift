@@ -137,9 +137,13 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
                 guard let self else { continue }
                 if let transaction = try? Self.checkVerified(result) {
                     // 与 purchase 路径同策略：verified 即放权，finish/重查/上报随后。
-                    // 已撤销（退款/家庭共享收回）的交易不放权
+                    // 已撤销（退款/家庭共享收回）的交易不放权。
+                    // isPro 是 @Published：赋值必须在主线程（objectWillChange 在后台
+                    // 线程发射会让 SwiftUI 视图崩溃），Task {} 默认不继承 MainActor
                     if transaction.revocationDate == nil,
-                       self.entitlementIDs.contains(transaction.productID) { self.isPro = true }
+                       self.entitlementIDs.contains(transaction.productID) {
+                        await MainActor.run { self.isPro = true }
+                    }
                     await transaction.finish()
                     await self.refreshEntitlement()
                     self.reportServerVerification(transaction)

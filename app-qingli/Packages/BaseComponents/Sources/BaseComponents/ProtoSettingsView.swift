@@ -147,16 +147,9 @@ public struct ProtoSettingsView: View {
                     })
             }
             .sheet(item: $legalDoc) { doc in
-                NavigationStack {
-                    LegalDocView(title: doc.title, html: doc.html)
-                        .navigationTitle(doc.title)
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("关闭") { legalDoc = nil }
-                            }
-                        }
-                }
+                LegalDocSheet(kind: doc.isPrivacy ? .privacy : .terms,
+                              url: doc.isPrivacy ? privacyURL : termsURL,
+                              html: doc.isPrivacy ? privacyHTML : termsHTML)
             }
         }
     }
@@ -325,17 +318,13 @@ public struct ProtoSettingsView: View {
     // MARK: - 动作
 
     private func openLegal(kind: LegalDoc.Kind, html: String?, url: URL?) {
-        // 需求：显示 URL 内容，App 缓存一份，URL 不可达时显示缓存。
-        // 三级兜底：远程 URL（成功即刷新缓存）→ 磁盘缓存 → spec 打包正文。
-        // 打开即弹 sheet（先展示兜底/缓存内容秒开），远程拉到最新后 LegalDocView 无感刷新。
-        legalDoc = LegalDoc(kind: kind, html: html ?? "")
-        let urlString = url?.absoluteString
-        LegalDocFetcher.fetch(kind: kind, urlString: urlString, fallbackHTML: html) { fresh, _ in
-            guard let fresh, !fresh.isEmpty else { return }
-            if self.legalDoc?.kind == kind {
-                self.legalDoc = LegalDoc(kind: kind, html: fresh)
-            }
+        // 需求：直接打开 URL；网络不可达时显示 App 内缓存文件。
+        // LegalDocSheet 内部处理：在线 → Safari 直出；离线 → 磁盘缓存 → 兜底正文。
+        // 这里先把兜底正文预热进缓存（无网首开也有内容），再弹 sheet。
+        if let html, !html.isEmpty {
+            LegalDocFetcher.warmCache(kind: kind, html: html)
         }
+        legalDoc = LegalDoc(kind: kind, html: html ?? "")
     }
 
     private func openFeedback() {

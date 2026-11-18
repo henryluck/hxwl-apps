@@ -301,10 +301,14 @@ public struct PaywallView: View {
             Task {
                 do {
                     try await pay.purchase()
-                    // 购买成功 → 壳层统一展示「完成订阅页」（整屏），然后收起订阅墙
+                    // 购买成功 → 先收起订阅墙（fullScreenCover dismiss 动画约 0.3s），
+                    // 再发通知让壳层展示「完成订阅页」——同步发通知时 cover 还在屏幕上，
+                    // ZStack 里的 success view 会被 cover 遮住看不到。
                     if pay.isPro {
-                        ProtoSubscriptionFlow.notifySuccess()
                         closePaywall()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            ProtoSubscriptionFlow.notifySuccess()
+                        }
                     }
                 } catch {
                     // 展示映射后的中文文案（StoreKitError.unknown 原文是英文

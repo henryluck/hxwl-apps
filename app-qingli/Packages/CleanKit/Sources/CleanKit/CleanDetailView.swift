@@ -7,7 +7,9 @@ import SwiftUI
 /// 底部主按钮随勾选实时计算「清理N项（释放X）」。
 public struct CleanDetailView: View {
     let kind: CleanKind
-    let summary: ScanSummary
+    // 改为可变 @State 绑定：清理后 removeAssets 直接更新本地 summary，
+    // 页面网格/候选列表立即刷新（修复问题2：第二次删除无反应 + 问题1：首页不同步）
+    @State private var localSummary: ScanSummary
     let onCleaned: () -> Void          // 清理完成回调（刷新扫描结果）
     /// 订阅门：未订阅点「清理N项/转为静态」→ 弹订阅页（需求：核心功能拉订阅）
     var pay: (any PayService)? = nil
@@ -22,12 +24,12 @@ public struct CleanDetailView: View {
     public init(kind: CleanKind, summary: ScanSummary, onCleaned: @escaping () -> Void,
                 pay: (any PayService)? = nil) {
         self.kind = kind
-        self.summary = summary
+        self._localSummary = State(initialValue: summary)
         self.onCleaned = onCleaned
         self.pay = pay
     }
 
-    private var groups: [CleanGroup] { summary.groups(for: kind) }
+    private var groups: [CleanGroup] { localSummary.groups(for: kind) }
     private var isSimilar: Bool { kind == .similarPhotos || kind == .similarVideos }
 
     /// 可清理候选（非最佳）
@@ -127,9 +129,13 @@ public struct CleanDetailView: View {
     /// 相似照片/视频：
     /// 需求：每一组相似图片放到一个单独的日期组卡片里——
     /// 每张卡 = 一个日期头（日期 + 汇总 + 全选该组）+ 该组一行横向滑动缩略图。
+    /// 性能：用 LazyVStack 而非 VStack —— 相似照片候选上百项时分出几十组，
+    /// VStack 会一次性创建全部 groupCard（每个含 LazyHStack + 多个 AssetThumb），
+    /// 主线程长时间忙 → XCUITest 等不到 app idle → 超时 kill。
+    /// LazyVStack 只渲染可见区域，滚动到再创建。
     private var similarList: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 12) {
+            LazyVStack(spacing: 12) {
                 ForEach(groups) { group in
                     groupCard(group)
                 }
@@ -177,9 +183,15 @@ public struct CleanDetailView: View {
             }
             .padding(12)
         }
+        // 可测锚点：组内资产总数 + 可清理数编码进 identifier，
+        // 供 UI 测试断言「清理后组数据即时刷新」
+        .accessibilityIdentifier("detail.group.\(group.id).a\(assetCount)c\(groupCandidates.count)")
     }
 
     /// 组内一行：最佳大格 + 其余小格横向滑动
+    /// 问题6修复：横向照片（宽>高）时固定方形会裁切+重叠。
+    /// 改为自适应宽度：保留照片原始宽高比，高度统一 110pt，宽度按比例计算。
+    /// 勾选 badge 固定在每格右上角，不受内容裁切影响。
     private func groupRow(_ group: CleanGroup) -> some View {
         let best = group.assets.first { $0.isBest }
         let rest = group.assets.filter { !$0.isBest }
@@ -187,7 +199,6 @@ public struct CleanDetailView: View {
             if let best {
                 bestCell(best)
             }
-            // Bug表R9-3：多张照片左右滑动查看（每格固定 88x110，勾选圆点完整显示在格内右上角）
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 8) {
                     ForEach(rest) { asset in
@@ -200,62 +211,72 @@ public struct CleanDetailView: View {
     }
 
     private func bestCell(_ asset: CleanAsset) -> some View {
-        ZStack(alignment: .topLeading) {
-            AssetThumb(assetID: asset.id)
-                .frame(width: 120, height: 150)
+        // 问题3/6修复：保留照片原始宽高比，高度固定 130pt，宽度按比例计算。
+        // 横向照片（宽>高）不会被裁切，竖向照片也不会被拉伸。
+        // 问题4修复：最佳标签不带勾选符号（纯文字）。
+        // 视觉修复：「最佳」标签改为叠在图片**左上角**且自带实心底衬，
+        // 不再半透明压在照片内容上导致文字与截图内容混在一起。
+        let ratio = asset.pixelHeight > 0
+            ? CGFloat(asset.pixelWidth) / CGFloat(asset.pixelHeight)
+            : 1.0
+        let cellHeight: CGFloat = 130
+        let cellWidth = max(80, min(200, cellHeight * ratio))
+        return ZStack(alignment: .topLeading) {
+            AssetThumb(assetID: asset.id, aspectRatio: ratio)
+                .frame(width: cellWidth, height: cellHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            // 需求4：最佳标签带勾选符号——与候选格勾选圆点视觉语言一致
-            HStack(spacing: 4) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .bold))
-                Text("最佳")
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(CleanPalette.green.opacity(0.92)))
-            .padding(6)
+            // 最佳标签（纯文字，无勾选符号）
+            Text("最佳")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(CleanPalette.green))
+                .padding(6)
         }
-        .frame(width: 120, height: 150)
+        .frame(width: cellWidth, height: cellHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func thumbCell(_ asset: CleanAsset) -> some View {
         let isSelected = selected.contains(asset.id)
+        // 问题3/6修复：保留照片原始宽高比，高度固定 110pt，宽度按比例计算。
+        // 截图/录屏等横向内容不会被裁切，勾选 badge 始终完整显示在右上角。
+        let ratio = asset.pixelHeight > 0
+            ? CGFloat(asset.pixelWidth) / CGFloat(asset.pixelHeight)
+            : 1.0
+        let cellHeight: CGFloat = 110
+        let cellWidth = max(70, min(180, cellHeight * ratio))
         return Button {
             if isSelected { selected.remove(asset.id) } else { selected.insert(asset.id) }
         } label: {
-            ZStack(alignment: .topTrailing) {
-                // Bug表R9-1：约束并裁切，照片内容不再超出范围
-                // 需求3：相似照片/视频里混入的截图/录屏比例不一 → 缩略图统一 4:5
-                // （与横向滑动格子 88x110 一致），图片 scaledToFill 裁切填满；
-                // 勾选圆点显示不全 → 上移到格内安全位（原 padding 5 被裁切边缘吃掉）
-                AssetThumb(assetID: asset.id, isVideo: asset.mediaType == .video)
-                    .frame(width: 88, height: 110)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                SelectBadge(selected: isSelected)
-                    .frame(width: 20, height: 20)
-                    .padding(6)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            }
-            .frame(width: 88, height: 110)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(isSelected ? CleanPalette.green : .clear, lineWidth: 2)
-            )
+            // 问题3修复：勾选 badge 走 AssetThumb 的 badge 插槽，
+            // 在 GeometryReader 内部精确定位，保证圆点完整显示在格内右上角
+            // （之前用外层 overlay 时圆点会溢出到图片外）。
+            AssetThumb(assetID: asset.id, isVideo: asset.mediaType == .video, aspectRatio: ratio,
+                       badge: AnyView(SelectBadge(selected: isSelected)
+                            .frame(width: 20, height: 20)
+                            .padding(6)
+                            .frame(width: cellWidth, height: cellHeight, alignment: .topTrailing)))
+                .frame(width: cellWidth, height: cellHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(isSelected ? CleanPalette.green : .clear, lineWidth: 2)
+                )
+                .frame(width: cellWidth, height: cellHeight)
         }
         .buttonStyle(.plain)
     }
 
     /// 模糊/截图/Live：平铺网格
+    /// 问题3修复：网格单元也保留原始宽高比（截图多为横向），不再强制方形
     private var flatGrid: some View {
         ScrollView(showsIndicators: false) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 10)],
                       spacing: 10) {
                 ForEach(candidates) { asset in
                     thumbCell(asset)
-                    // Bug表R6：模糊照片/截图清理图片比例改为 1:1（原 0.78 竖长条）
-                    .aspectRatio(1, contentMode: .fit)
                 }
             }
             .padding(.bottom, 16)
@@ -315,15 +336,16 @@ public struct CleanDetailView: View {
     }
 
     /// 从本地 summary 中移除指定资产（无需等待重扫，网格/统计立即同步）
+    /// 修复问题1/2：同时更新 localSummary（页面数据源）和 CleanCenter（全局）
     private func removeAssets(ids: Set<String>) {
-        var updated = summary
-        let kept = updated.groups(for: kind).compactMap { group -> CleanGroup? in
+        let kept = localSummary.groups(for: kind).compactMap { group -> CleanGroup? in
             let remaining = group.assets.filter { !ids.contains($0.id) }
             guard !remaining.isEmpty else { return nil }
             return CleanGroup(id: group.id, kind: group.kind, assets: remaining)
         }
-        updated.groups[kind] = kept
-        CleanCenter.shared.summary = updated
+        localSummary.groups[kind] = kept
+        // 同步到全局：首页 onAppear 时检测到变化即刷新
+        CleanCenter.shared.summary = localSummary
     }
 
     // MARK: - 成功页

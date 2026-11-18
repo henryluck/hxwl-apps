@@ -6,6 +6,56 @@ import WidgetKit
 // 数据模型 CleanActivityAttributes 定义在 CleanKit/CleanLiveActivityManager.swift，
 // 由本 target 直接编译该文件共享（xcodegen sources 含该路径）。
 
+/// 卡片内容里显示 App 真实图标。
+/// 关键：图标 PNG 以「散资源文件」形式内置在 Widget 扩展 bundle 里，运行时直读——
+/// 不是 Asset Catalog！Asset Catalog 的 imageset 会被 actool deepmap2 压缩，
+/// 在 Live Activity 渲染进程里解码失败，图标渲染成黑块。
+/// 散 PNG + Bundle(for:).url + UIImage(contentsOfFile:) 完全绕开 actool 编译期处理。
+struct AppIconView: View {
+    var size: CGFloat
+
+    /// 进程内只加载一次。
+    /// 文件用 .bin 扩展名内置在 Widget 扩展 bundle 里——不是 .png！
+    /// 因为 Xcode 的 Copy Bundle Resources 阶段会对 .png 文件做 pngcrush 压缩，
+    /// 修改 PNG 内部格式，导致 Live Activity 渲染进程解码失败。
+    /// .bin 扩展名让 Xcode 原样拷贝，运行时按路径直读 PNG 数据。
+    /// Bundle(for:) 从本类所在 bundle（Widget 扩展）取资源——比 Bundle.main 可靠：
+    /// Live Activity 渲染进程的 Bundle.main 可能指向 SpringBoard 而非扩展 bundle。
+    /// 两种都试一遍兜底。失败返回 nil，body 里走兜底色块。
+    private static let icon: UIImage? = {
+        let bundle = Bundle(for: AppIconViewMarker.self)
+        for b in [bundle, Bundle.main] {
+            if let url = b.url(forResource: "AppIcon", withExtension: "bin"),
+               let image = UIImage(contentsOfFile: url.path) {
+                return image
+            }
+        }
+        return nil
+    }()
+
+    var body: some View {
+        if let icon = Self.icon {
+            Image(uiImage: icon)
+                .resizable()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.225))
+        } else {
+            // 兜底：图标加载失败时显示品牌色方块，不留空白
+            RoundedRectangle(cornerRadius: size * 0.225)
+                .fill(Color(red: 0.55, green: 0.89, blue: 0.68))
+                .frame(width: size, height: size)
+                .overlay(
+                    Image(systemName: "sparkles")
+                        .font(.system(size: size * 0.4, weight: .medium))
+                        .foregroundStyle(.white)
+                )
+        }
+    }
+}
+
+/// Marker class for Bundle(for:) 定位 Widget 扩展 bundle
+final class AppIconViewMarker {}
+
 @available(iOS 16.1, *)
 struct CleanLiveActivityView: View {
     let context: ActivityViewContext<CleanActivityAttributes>
@@ -15,27 +65,11 @@ struct CleanLiveActivityView: View {
     private let cardDark = Color(red: 0.32, green: 0.39, blue: 0.37)        // #52655E
 
     var body: some View {
-        // 原型布局：第一行 logo + 「温馨提示：」；第二行描述整行可折行；第三行「立即清理」整行胶囊
+        // 原型布局：第一行 App图标 + 「温馨提示：」；第二行描述整行可折行；第三行「立即清理」整行胶囊
         VStack(alignment: .leading, spacing: 10) {
-            // 第一行：logo + 标题（logo 用 App 真实图标——appicon.png 已加入本 target 资源）
+            // 第一行：App 真实图标 + 标题
             HStack(spacing: 12) {
-                if let appIcon = UIImage(named: "appicon") {
-                    Image(uiImage: appIcon)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 34, height: 34)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                } else {
-                    // 兜底：图标资源缺失时回退 SF Symbol
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(brandGreen)
-                        Image(systemName: "trash.slash")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 34, height: 34)
-                }
+                AppIconView(size: 34)
                 Text("温馨提示：")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(brandGreen)
@@ -74,14 +108,8 @@ struct CleanLiveActivityWidget: Widget {
             // 灵动岛
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(red: 0.55, green: 0.89, blue: 0.68))
-                        Image(systemName: "trash.slash")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 34, height: 34)
+                    // 展开态左上角：App 真实图标（26pt）
+                    AppIconView(size: 26)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text("可清理垃圾 \(context.state.cleanableText)")
@@ -99,17 +127,15 @@ struct CleanLiveActivityWidget: Widget {
                     }
                 }
             } compactLeading: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color(red: 0.55, green: 0.89, blue: 0.68))
+                // 胶囊左侧：App 真实图标（16pt）
+                AppIconView(size: 16)
             } compactTrailing: {
                 Text(context.state.cleanableText)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color(red: 0.55, green: 0.89, blue: 0.68))
             } minimal: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color(red: 0.55, green: 0.89, blue: 0.68))
+                // 独立小圆点：App 真实图标（16pt）
+                AppIconView(size: 16)
             }
         }
     }

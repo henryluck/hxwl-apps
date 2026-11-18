@@ -14,6 +14,7 @@
 		336A6416EF4AF4CE0A255C18 /* DateUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9678CC45E481EF6083D55CD9 /* DateUtil.swift */; };
 		40BCD23B05C9BB301B0B9EE5 /* catalog.json in Resources */ = {isa = PBXBuildFile; fileRef = D1260E783552432AADAF462F /* catalog.json */; };
 		4FA1E3FFC8F2295A950082BE /* FormatHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67A070B574C4D6ED76D6B81C /* FormatHelper.swift */; };
+		4FDF8D1EF0C283ACC22AA2D4 /* AppIcon.bin in Resources */ = {isa = PBXBuildFile; fileRef = 9FE750049BB3EA3D31770147 /* AppIcon.bin */; };
 		51A443145F4FDC03544449B8 /* CleanActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358BBEE62B1552FE701E13AE /* CleanActivityAttributes.swift */; };
 		53B68DC784775B862FCD6391 /* CleanLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7901CBCF8D4DF567681D1A99 /* CleanLiveActivity.swift */; };
 		546D0B253D82779738A26BE4 /* CleanLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D23A2FAAFC1EA5AB451ED0E6 /* CleanLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -75,6 +76,7 @@
 		9856BDC7A72048FF2F555193 /* PluginRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistry.swift; sourceTree = "<group>"; };
 		9C994F39CF5D619402CB6906 /* BaseComponents */ = {isa = PBXFileReference; lastKnownFileType = folder; name = BaseComponents; path = Packages/BaseComponents; sourceTree = SOURCE_ROOT; };
 		9DA3EE51B6E974507BDB5777 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = assets; path = Resources/assets; sourceTree = SOURCE_ROOT; };
+		9FE750049BB3EA3D31770147 /* AppIcon.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; path = AppIcon.bin; sourceTree = "<group>"; };
 		ACE980FA606F6745E183D7A3 /* FactoryCore.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FactoryCore.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10F0BB21CF56A44DD0ABED9 /* ColorMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorMath.swift; sourceTree = "<group>"; };
 		D1260E783552432AADAF462F /* catalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = catalog.json; sourceTree = "<group>"; };
@@ -133,6 +135,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		8767DE94AD1685C27B154F19 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				9FE750049BB3EA3D31770147 /* AppIcon.bin */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		B1525EFE34B30058E8C734A8 = {
 			isa = PBXGroup;
 			children = (
@@ -153,6 +163,7 @@
 				358BBEE62B1552FE701E13AE /* CleanActivityAttributes.swift */,
 				7901CBCF8D4DF567681D1A99 /* CleanLiveActivity.swift */,
 				F6AD590F4C7C1D07C147F7ED /* Info.plist */,
+				8767DE94AD1685C27B154F19 /* Resources */,
 			);
 			path = Widgets;
 			sourceTree = "<group>";
@@ -187,6 +198,7 @@
 			buildConfigurationList = 8AAFB82930519BA118FAEC8E /* Build configuration list for PBXNativeTarget "CleanLiveActivityExtension" */;
 			buildPhases = (
 				755B0D9A8FECFF8BB4D274B7 /* Sources */,
+				DBFD4C3C3A0DECC2EF37DE2C /* Resources */,
 			);
 			buildRules = (
 			);
@@ -286,6 +298,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DBFD4C3C3A0DECC2EF37DE2C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4FDF8D1EF0C283ACC22AA2D4 /* AppIcon.bin in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
@@ -350,6 +370,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				COMPRESS_PNG_FILES = NO;
+				CRUSH_PNG_FILES = NO;
 				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 363GQLCMXG;
 				INFOPLIST_FILE = Widgets/Info.plist;
@@ -542,6 +564,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				COMPRESS_PNG_FILES = NO;
+				CRUSH_PNG_FILES = NO;
 				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 363GQLCMXG;
 				INFOPLIST_FILE = Widgets/Info.plist;

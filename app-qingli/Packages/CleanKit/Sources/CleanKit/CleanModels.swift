@@ -74,7 +74,7 @@ public struct CleanGroup: Identifiable {
     }
 }
 
-/// 扫描结果汇总（Equatable：r26 首页比对 CleanCenter 最新值决定是否刷新）
+/// 扫描结果汇总（Equatable：首页比对 CleanCenter 最新值决定是否刷新）
 public struct ScanSummary: Equatable {
     public var groups: [CleanKind: [CleanGroup]] = [:]
     public var totalCleanableBytes: Int64 {
@@ -91,10 +91,19 @@ public struct ScanSummary: Equatable {
         groups(for: kind).reduce(0) { $0 + $1.assets.filter { !$0.isBest }.count }
     }
 
+    // 改进点（用户反馈1/8）：精确比较组内资产列表，不再只比总数/键集合。
+    // 这样删除部分照片后，即使总数恰好不变，也能检测到内容变化并刷新首页。
     public static func == (lhs: ScanSummary, rhs: ScanSummary) -> Bool {
-        lhs.totalCleanableBytes == rhs.totalCleanableBytes
-            && lhs.totalCleanableCount == rhs.totalCleanableCount
-            && lhs.groups.keys == rhs.groups.keys
+        guard lhs.groups.keys == rhs.groups.keys else { return false }
+        for (kind, lhsGroups) in lhs.groups {
+            let rhsGroups = rhs.groups[kind] ?? []
+            guard lhsGroups.count == rhsGroups.count else { return false }
+            for (l, r) in zip(lhsGroups, rhsGroups) {
+                guard l.id == r.id,
+                      l.assets.map(\.id) == r.assets.map(\.id) else { return false }
+            }
+        }
+        return true
     }
 }
 

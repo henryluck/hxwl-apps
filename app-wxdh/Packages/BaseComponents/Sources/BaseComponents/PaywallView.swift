@@ -539,12 +539,13 @@ public struct PaywallView: View {
 
     /// 启动场景的价格行（场景 01/03）。
     /// 【文案口径】统一模板（A/B/C/D 全套餐同格式）：
-    ///   常规（含 5.8 / 8 / 1.8）：「新用户特惠首周￥X.X，之后￥58/周」
-    ///   免费试用（A）：「新用户特惠免费试用3天，之后￥58/周」
-    /// 整行不加粗；字号 14pt（较 18 原版小 4 号、较 16 再小 2 号）。
+    ///   常规（含 5.8 / 8 / 1.8）：「新用户特惠首周¥X.X，之后¥58/周」
+    ///   免费试用（A）：「新用户特惠免费试用3天，之后¥58/周」
+    /// 【样式】按钮上方价格说明：小号（12pt）、浅灰、不加粗（弱化说明文字，突出按钮）。
     /// 续费价按生效套餐的 renew（B=58、C/D=48），StoreKit 实价优先。
     private var startupPriceLine: Text {
-        let size: CGFloat = 14
+        let size: CGFloat = 12
+        let ink = Color(hex: "8A8F8C")   // 浅灰（说明性文字，不与正文抢视觉）
 
         // 生效价格：分流模式取决策套餐（A 试用 / B 5.8 / C 8 / D 1.8）；否则全局配置
         let isTrial: Bool
@@ -556,7 +557,7 @@ public struct PaywallView: View {
                 ? "\(activePlan.trialDays)"
                 : PaywallPlanCopyResolver.yuan(activePlan.intro)
             renewForLine = PaywallPlanCopyResolver.isZeroPrice(pay.renewDisplayPrice)
-                ? "￥\(PaywallPlanCopyResolver.yuan(activePlan.renew))"
+                ? "¥\(PaywallPlanCopyResolver.yuan(activePlan.renew))"
                 : pay.renewDisplayPrice!
         } else if config.strategy == "free_trial" {
             isTrial = true
@@ -568,19 +569,22 @@ public struct PaywallView: View {
             renewForLine = renewPrice
         }
 
-        // 免费试用：「新用户特惠免费试用3天，之后￥58/周」
+        // 免费试用：「新用户特惠免费试用3天，之后¥58/周」
         if isTrial {
             return Text("新用户特惠免费试用\(introDigitsForLine)天，之后\(renewForLine)/周")
                 .font(.system(size: size))
+                .foregroundColor(ink)
         }
-        // 常规（有首期资格）：「新用户特惠首周￥X.X，之后￥58/周」
+        // 常规（有首期资格）：「新用户特惠首周¥X.X，之后¥58/周」
         if introAvailable {
-            return Text("新用户特惠首周￥\(introDigitsForLine)，之后\(renewForLine)/周")
+            return Text("新用户特惠首周¥\(introDigitsForLine)，之后\(renewForLine)/周")
                 .font(.system(size: size))
+                .foregroundColor(ink)
         }
         // 场景 03：无首期资格，不出现任何首周暗示
-        return Text("￥\(Self.amountDigits(renewPrice))/周")
+        return Text("¥\(Self.amountDigits(renewPrice))/周")
             .font(.system(size: size))
+            .foregroundColor(ink)
     }
 
     /// 方案行：单选圆点 + 名称/说明 + 价格（选中加粗描边）

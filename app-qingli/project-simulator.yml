@@ -105,7 +105,7 @@ targets:
     deploymentTarget: "16.1"     # Live Activity 最低 16.1
     sources:
       - Widgets
-      # 锁屏卡片 logo 用的 App 图标（CleanLiveActivity.swift 里 Image(named: "appicon")）
+      # 锁屏卡片 logo 用的 App 图标（散 .bin 文件，绕开 Xcode PNG 压缩）
       - path: Widgets/Resources
         type: group
     info:
@@ -125,6 +125,11 @@ targets:
         MARKETING_VERSION: "1.1.6"
         CURRENT_PROJECT_VERSION: "35"
         SKIP_INSTALL: YES
+        # 关闭 PNG 压缩：Live Activity 散 PNG 直读（UIImage(contentsOfFile:)）需要
+        # 原始未压缩 PNG，COMPRESS_PNG_FILES/CRUSH_PNG_FILES 会修改 PNG 内部格式，
+        # 导致渲染进程解码失败图标变黑块/错图
+        COMPRESS_PNG_FILES: NO
+        CRUSH_PNG_FILES: NO
 schemes:
   FactoryCoreSim:
     build:

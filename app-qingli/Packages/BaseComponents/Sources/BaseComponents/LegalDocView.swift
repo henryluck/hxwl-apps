@@ -64,4 +64,6 @@ public struct LegalDoc: Identifiable, Equatable {
 
     public var id: String { kind.rawValue }
     public var title: String { kind == .privacy ? "隐私政策" : "用户协议" }
+    /// 是否隐私政策（LegalDocSheet 由此选择 URL/正文，避免跨类型映射）
+    public var isPrivacy: Bool { kind == .privacy }
 }

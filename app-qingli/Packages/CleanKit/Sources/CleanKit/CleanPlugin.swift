@@ -64,12 +64,11 @@ struct CleanHomeTab: View {
     let context: PluginContext
     var onDepthChange: ((Bool) -> Void)? = nil
 
-    /// 需求6：已订阅冷启动会员标识状态错误——pay 是 ObservableObject（StoreKit 异步
-    /// 恢复购买后 isPro 变 true），但原来 `context.pay.isPro` 取一次性快照，订阅状态
-    /// 晚到时不刷新首页。`@ObservedObject` 不能包 existential 类型，改手动订阅
-    /// objectWillChange：状态变化时置 refresh 触发重算 isPro。
+    /// 需求6：已订阅冷启动会员标识状态错误——根因是 AnyPayService 此前不转发
+    /// objectWillChange，StoreKit 异步恢复购买后首页收不到通知（原 1.5s 单次轮询
+    /// 在 StoreKit 慢于窗口时漏掉）。AnyPayService 已改为转发 objectWillChange
+    /// （见 Capabilities.swift），首页会员标识随 isPro 翻转立即重渲染，无需轮询。
     @State private var refresh = false
-    @State private var proWatchStarted = false
 
     /// 当前是否已订阅（每次 body 重算，不受快照影响）
     private var isProNow: Bool {
@@ -120,23 +119,6 @@ struct CleanHomeTab: View {
         }
         .onAppear { reportDepth(path.count > 0) }
         .onDisappear { reportDepth(false) }
-        // 需求6：兜底轮询——StoreKit 恢复购买是异步的，objectWillChange 无法经通知中心
-        // 广播（ObservableObject 不走 NotificationCenter），改为每 1.5s 比对 isPro，
-        // 变化即 refresh.toggle() 触发 body 重算（首页已订阅标识立即纠正）。
-        // 变化一次后自动停（isPro 不会反复变）。
-        .onAppear {
-            guard !proWatchStarted else { return }
-            proWatchStarted = true
-            let lastIsPro = context.pay.isPro
-            Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { t in
-                Task { @MainActor in
-                    if context.pay.isPro != lastIsPro {
-                        refresh.toggle()
-                        t.invalidate()
-                    }
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -167,6 +149,9 @@ struct CleanHomeTab: View {
         case .analysis:
             StorageAnalysisView(onClean: { path.append(Route.suggest) })
         case .detail(let kind):
+            // 问题1/2修复：详情页用 @State localSummary，init 时从 CleanCenter 取最新值。
+            // removeAssets 直接更新 localSummary + CleanCenter，页面网格立即刷新。
+            // onCleaned 触发重扫：重扫完成前 localSummary 已是最新（删除后的）状态。
             CleanDetailView(kind: kind, summary: CleanCenter.shared.summary ?? ScanSummary(),
                             pay: context.pay) {
                 rescan()
@@ -189,7 +174,8 @@ struct CleanHomeTab: View {
     }
 
     private func rescan() {
-        CleanCenter.shared.summary = nil
+        // 问题1修复：不先置 nil（会丢失详情页 removeAssets 已更新的 summary，
+        // 导致首页短暂显示空列表）。直接异步重扫，完成后替换。
         CleanScanner.shared.scanAll { result in
             CleanCenter.shared.summary = result
         }

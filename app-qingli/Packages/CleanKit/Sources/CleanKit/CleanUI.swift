@@ -51,58 +51,97 @@ public struct AssetThumb: View {
     let assetID: String
     var isVideo = false
     var isLive = false
+    /// 原始宽高比（宽/高）。> 0 时按该比例完整加载、不裁切。
+    /// 问题3修复：横向截图/录屏需要完整显示，不能用方形 aspectFill 裁切。
+    var aspectRatio: CGFloat = 0
+    /// 右上角徽标（如勾选圆点）。
+    /// 问题3修复：徽标必须在 AssetThumb 内部用 GeometryReader 尺寸精确定位。
+    /// 之前用外层 overlay 时，GeometryReader 的 flexible 尺寸会让 overlay
+    /// 的对齐基准跑出 cell，勾选圆点一半露在图片外面。
+    /// badge 需自行用 `.frame(width:height:alignment:)` 指定对齐方式。
+    var badge: AnyView?
 
     @State private var image: UIImage?
 
-    public init(assetID: String, isVideo: Bool = false, isLive: Bool = false) {
+    public init(assetID: String, isVideo: Bool = false, isLive: Bool = false,
+                aspectRatio: CGFloat = 0, badge: AnyView? = nil) {
         self.assetID = assetID
         self.isVideo = isVideo
         self.isLive = isLive
+        self.aspectRatio = aspectRatio
+        self.badge = badge
     }
 
     public var body: some View {
-        ZStack {
-            Rectangle().fill(Color(hex: "F2F3F5"))
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Image(systemName: isVideo ? "film.stack" : (isLive ? "livephoto" : "photo"))
-                    .foregroundStyle(Color(hex: "C9CDD4"))
-            }
-            if isVideo {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white)
-                            .padding(4)
-                            .background(Circle().fill(.black.opacity(0.45)))
+        // 用 GeometryReader 拿到父级给的真实尺寸：
+        // AssetThumb 自身不知道会被放进多大的 frame，
+        // 若让 ZStack 按 Image 的固有尺寸布局，图片会撑开 cell，
+        // 外层 overlay 的勾选 badge 就会跑到 cell 之外（显示不完整）。
+        GeometryReader { geo in
+            ZStack(alignment: .topTrailing) {
+                Color(hex: "F2F3F5")
+                if let image {
+                    if aspectRatio > 0 {
+                        // 问题3修复：按原始宽高比完整显示，不裁切两侧
+                        // （横向截图/录屏必须能看全）
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    } else {
+                        // 默认：裁切填满（方形缩略图视觉统一）
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    }
+                } else {
+                    Image(systemName: isVideo ? "film.stack" : (isLive ? "livephoto" : "photo"))
+                        .foregroundStyle(Color(hex: "C9CDD4"))
+                }
+                if isVideo {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white)
+                                .padding(4)
+                                .background(Circle().fill(.black.opacity(0.45)))
+                            Spacer()
+                        }
+                        .padding(4)
+                    }
+                }
+                if isLive {
+                    VStack {
+                        HStack {
+                            Image(systemName: "livephoto")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white)
+                                .padding(3)
+                                .background(Circle().fill(.black.opacity(0.45)))
+                            Spacer()
+                        }
                         Spacer()
                     }
                     .padding(4)
                 }
-            }
-            if isLive {
-                VStack {
-                    HStack {
-                        Image(systemName: "livephoto")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white)
-                            .padding(3)
-                            .background(Circle().fill(.black.opacity(0.45)))
-                        Spacer()
-                    }
-                    Spacer()
+                // 徽标在 cell 内部精确定位（用 geo 尺寸，不依赖外部 overlay 对齐）
+                if let badge {
+                    badge
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .topTrailing)
                 }
-                .padding(4)
             }
+            // 问题3/6修复：内容裁切在 cell 内
+            .clipped()
         }
-        .clipped()
-        .task(id: assetID) {
-            image = await ThumbCache.shared.load(assetID: assetID)
+        .task(id: "\(assetID)#\(Int(aspectRatio * 100))") {
+            if aspectRatio > 0 {
+                image = await ThumbCache.shared.load(assetID: assetID, aspectRatio: aspectRatio)
+            } else {
+                image = await ThumbCache.shared.load(assetID: assetID)
+            }
         }
     }
 }
@@ -145,6 +184,41 @@ public final class ThumbCache {
                 }
                 // 防御：理论上 highQualityFormat 只回调一次，但 iCloud/异常路径若再回调
                 // 绝不能二次 resume（会崩）。重复回调仅更新缓存后忽略。
+                if degraded { return }
+                cont.resume(returning: img)
+            }
+        }
+    }
+
+    /// 按目标宽高比加载完整图片（不裁切）
+    /// 问题3修复：横向截图/录屏用 aspectFill 会被裁掉两侧，
+    /// 这里用 .aspectFit + 目标尺寸按原比例，图片完整显示。
+    /// 缓存 key 带尺寸参数，避免与方形缓存互相污染。
+    public func load(assetID: String, aspectRatio: CGFloat) async -> UIImage? {
+        let ratio = max(0.2, min(5.0, aspectRatio))   // 0.2~5.0，防止极端比例
+        let key = "\(assetID)@\(Int(ratio * 100))" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        // 高度固定 300pt，宽度按比例（上限 900，防超大图）
+        let height: CGFloat = 300
+        let width = min(900, max(60, height * ratio))
+        let size = CGSize(width: width, height: height)
+        return await withCheckedContinuation { cont in
+            let fetch = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
+            guard let asset = fetch.firstObject else {
+                cont.resume(returning: nil)
+                return
+            }
+            let opts = PHImageRequestOptions()
+            opts.isNetworkAccessAllowed = false
+            opts.deliveryMode = .highQualityFormat
+            opts.resizeMode = .fast
+            PHImageManager.default().requestImage(for: asset, targetSize: size,
+                                                  contentMode: .aspectFit, options: opts) { img, info in
+                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if let img, !degraded {
+                    self.cache.setObject(img, forKey: key,
+                                         cost: Int(img.size.width * img.size.height * 4))
+                }
                 if degraded { return }
                 cont.resume(returning: img)
             }

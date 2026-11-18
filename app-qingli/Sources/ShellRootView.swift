@@ -307,6 +307,14 @@ struct ShellRootView: View {
 
     /// 触发订阅页（isPro 短路 + 防重入）
     private func tryTriggerPaywall() {
+        // UI 测试钩子：-uitest-no-paywall 彻底跳过订阅墙/挽留页弹窗。
+        // 背景：R4 规则里「bootCount>=1 的未订阅用户每次冷启动都召回」，
+        // 这会让截屏类 UI 测试被 fullScreenCover 盖住，测不到真实页面。
+        if ProcessInfo.processInfo.arguments.contains("-uitest-no-paywall") {
+            didTriggerPaywall = true
+            seenPaywall = true
+            return
+        }
         guard entitlementReady, !didTriggerPaywall else { return }
         if capabilities.pay.isPro { return }   // 已订阅 → 什么都不弹
         // 引导未完成时不在此弹：OnboardingFlow 末页自带 ProtoPaywallView 承接，
@@ -346,7 +354,9 @@ struct ShellRootView: View {
     /// 挽留价是首期优惠；有订阅历史（含到期未续）的用户已无首期资格、
     /// 实扣原价——展示「低价体验」即误导，故此类用户不弹挽留页。
     private var shouldOfferRetention: Bool {
-        paywallConfig.retentionEnabled && !hasPurchasedRetention
+        // UI 测试钩子：-uitest-no-paywall 一并跳过挽留页（限时特惠）
+        if ProcessInfo.processInfo.arguments.contains("-uitest-no-paywall") { return false }
+        return paywallConfig.retentionEnabled && !hasPurchasedRetention
             && !capabilities.pay.hasSubscriptionHistory
     }
 

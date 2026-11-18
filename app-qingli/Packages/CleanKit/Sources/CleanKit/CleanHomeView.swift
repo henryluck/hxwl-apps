@@ -1,11 +1,15 @@
 import BaseComponents
 import Capabilities
+import Combine
 import CoreKit
 import Photos
 import SwiftUI
 
 /// 首页：储存空间健康度卡片 + 推荐清理列表 + iPhone 储存分析入口。
 /// 状态机：idle(仪表) → scanning(进度动画) → done(刷新仪表与列表)。
+/// 扫描状态以 CleanScanner.shared 单例为准（跨 Tab/视图重建存活）——
+/// 此前用本地 @State scanning，切 Tab 回来视图重建后状态归零再起第二个扫描，
+/// 两个扫描并发互写 progress 导致加载环错位。
 public struct CleanHomeView: View {
     let theme: any ThemeService
     let isPro: Bool
@@ -14,12 +18,16 @@ public struct CleanHomeView: View {
     let openCategory: (CleanKind) -> Void
 
     @State private var storage = DeviceStorage.current()
-    @State private var scanning = false
+    /// 扫描中状态 = 单例 isScanning（@Published，观察它跨视图重建不丢）
+    @ObservedObject private var scanner = CleanScanner.shared
     @State private var summary: ScanSummary?
     @State private var needsPhotoAuth = false
     // 需求：未开相册权限点一键智能清理 → 权限引导弹窗
     @State private var showPhotoAuthAlert = false
     @Environment(\.scenePhase) private var scenePhase
+
+    // 问题1修复：监听 CleanCenter 的 objectWillChange，清理后返回首页时自动刷新
+    @ObservedObject private var center = CleanCenter.shared
 
     public init(theme: any ThemeService, isPro: Bool,
                 onDeepClean: @escaping () -> Void,
@@ -61,21 +69,35 @@ public struct CleanHomeView: View {
         .navigationBarHidden(true)
         .onAppear {
             storage = DeviceStorage.current()
-            // Bug表r26：返回首页时同步全局最新扫描结果——
-            // 详情页/扫描页更新过 CleanCenter.summary 后，首页推荐项要跟着刷新
-            // （原逻辑只在 summary==nil 时扫描，导致首页一直显示旧数据）
-            if let latest = CleanCenter.shared.summary, latest != summary {
+            // 问题1修复：每次出现时从 CleanCenter 同步最新结果。
+            // ScanSummary.== 已改为精确比较组内资产列表，删除部分照片后一定检测到变化。
+            if let latest = CleanCenter.shared.summary {
                 summary = latest
             }
-            if summary == nil, !scanning {
+            // 扫描状态以单例为准（问题3：视图重建不再重复起扫）；无结果才起扫
+            if !scanner.isScanning, summary == nil {
                 startScan()
             }
         }
-        .onChange(of: scenePhase) { phase in
-            // 授权回调可能因弹窗被系统层点掉而丢失 → 回到前台时补扫
-            if phase == .active, summary == nil, !scanning {
+        // 问题1修复：监听 CleanCenter 变化，详情页 removeAssets 后首页立即收到通知
+        .onChange(of: center.summary) { (newValue: ScanSummary?) in
+            if let newValue, newValue != summary {
+                summary = newValue
+            }
+        }
+        // 显式标注参数类型，强制选中 iOS 16 的 onChange(of:perform:) 重载
+        // （否则编译器会选 iOS 17 的单参重载，闭包参数被推断成 ()）
+        .onChange(of: scenePhase) { (phase: ScenePhase) in
+            if phase == .active {
                 storage = DeviceStorage.current()
-                startScan()
+                // 需求1：后台期间用户可能在系统相册增删照片 → 回前台重扫。
+                // 注意只在「有旧结果」时重扫：无结果的冷启动场景 onAppear 已起扫，
+                // 这里再起会跟权限弹窗/沙盒登录弹窗的 scene 切换叠加触发
+                // （UI 测试下弹窗让 scene 反复 inactive→active，旧版无条件重扫
+                //  造成扫描风暴）。
+                if summary != nil, !scanner.isScanning {
+                    startScan()
+                }
             }
         }
         .alert("需要访问照片权限",
@@ -257,10 +279,11 @@ public struct CleanHomeView: View {
 
     private var gaugeCardInner: some View {
         VStack(spacing: 14) {
-            if scanning {
+            if scanner.isScanning {
                 // 需求2/3：扫描进度数字 0%→100% 动态累加、顺时针环形走满一圈
-                ScanningIndicator(label: CleanScanner.shared.phaseLabel,
-                                  progress: CleanScanner.shared.progress)
+                // （progress 直接观察单例，扫描中切 Tab 回来不重建状态、不错位）
+                ScanningIndicator(label: scanner.phaseLabel,
+                                  progress: scanner.progress)
                     .padding(.vertical, 26)
             } else {
                 scoreRow
@@ -368,8 +391,13 @@ public struct CleanHomeView: View {
                         } else {
                             ForEach(thumbs.indices, id: \.self) { idx in
                                 let a = thumbs[idx]
+                                // 问题3修复：按原始宽高比完整显示，横向截图不被裁切
+                                let ratio = a.pixelHeight > 0
+                                    ? CGFloat(a.pixelWidth) / CGFloat(a.pixelHeight)
+                                    : 1.0
                                 AssetThumb(assetID: a.id, isVideo: a.mediaType == .video,
-                                           isLive: a.kind == .livePhotos)
+                                           isLive: a.kind == .livePhotos,
+                                           aspectRatio: ratio)
                                     .frame(width: 70, height: 70)
                                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
@@ -380,7 +408,13 @@ public struct CleanHomeView: View {
                 .padding(14)
             }
         }
+        // 保留原 identifier（既有 UI 测试用 home.kind.X 定位）
         .accessibilityIdentifier("home.kind.\(kind.rawValue)")
+        // 问题1修复的可测锚点：在 label 尾部附上项数，
+        // UI 测试比对清理前后首页卡片是否已同步刷新。
+        // （不用 accessibilityValue：XCUITest 读它不稳定；
+        //   也不改 identifier：会破坏既有 home.kind.X 的定位）
+        .accessibilityLabel("\(kind.title) count=\(count)")
     }
 
     private func kindIcon(_ kind: CleanKind) -> some View {
@@ -400,10 +434,15 @@ public struct CleanHomeView: View {
             .background(RoundedRectangle(cornerRadius: 8).fill(bg))
     }
 
-    /// 该分类的缩略图资产（最多 4 张；Bug表R5-5：不足四张只显示实际数量）
+    /// 该分类的缩略图资产（最多 4 张）
+    /// 问题8修复：从第一组（最新）取前 4 张，确保每次进入 App 显示的照片一致。
+    /// 扫描结果现在按时间倒序稳定排列，不再是字典无序遍历。
     private func thumbAssets(for kind: CleanKind) -> [CleanAsset] {
         guard let s = summary else { return [] }
-        return Array(s.groups(for: kind).flatMap({ $0.assets }).prefix(4))
+        let groups = s.groups(for: kind)
+        if groups.isEmpty { return [] }
+        // 取第一组的全部资产（第一张是最佳，其余按时间倒序），最多 4 张
+        return Array(groups[0].assets.prefix(4))
     }
 
     /// 未扫描时的预估展示值（与原型数值一致的静态提示，扫描后替换为真实值）
@@ -445,15 +484,18 @@ public struct CleanHomeView: View {
             return
         }
         needsPhotoAuth = false
-        scanning = true
+        // 扫描中状态由 CleanScanner.isScanning 驱动（@ObservedObject scanner），
+        // scanAll 自带防重入：进行中会挂接回调，完成时与首个调用方同结果
         CleanScanner.shared.scanAll { result in
             summary = result
             // 同步到全局中心：详情/建议/分析页读的是这一份
             CleanCenter.shared.summary = result
-            scanning = false
             storage = DeviceStorage.current()
             // 扫描发现可清理垃圾 → 启动锁屏实时活动卡片（ActivityKit，非 App 内卡片）
-            if result.totalCleanableBytes > 0 {
+            // UI 测试下不启动：残留的 Live Activity 会让 chronod 在重装时对
+            // 扩展发 kill(9)，连带干扰 App/Runner 生命周期（测试连环 crash）
+            if result.totalCleanableBytes > 0,
+               !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-uitest") }) {
                 CleanLiveActivityManager.showScanResult(
                     cleanableBytes: result.totalCleanableBytes,
                     appName: "垃圾清理助手")
@@ -557,6 +599,10 @@ struct ScanningIndicator: View {
     /// 0~1 显示进度（驱动百分比数字与环形进度，扫描完成时到达 1 → 100%）
     let progress: Double
     @State private var spin = false
+    /// 上一帧进度：新一轮扫描开始时 progress 从 1 跳回 0，
+    /// 若仍挂 easeInOut 动画会看到弧「倒扫一圈」（视觉上就是环错位）——
+    /// 进度下降（重扫复位）时不挂动画直接归零。
+    @State private var lastProgress: Double = 0
 
     var body: some View {
         VStack(spacing: 14) {
@@ -568,7 +614,8 @@ struct ScanningIndicator: View {
                     .trim(from: 0, to: CGFloat(min(max(progress, 0), 1)))
                     .stroke(CleanPalette.green, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeInOut(duration: 0.3), value: progress)
+                    .animation(progress >= lastProgress ? .easeInOut(duration: 0.3) : nil,
+                               value: progress)
             }
             .frame(width: 52, height: 52)
             .overlay(
@@ -583,5 +630,8 @@ struct ScanningIndicator: View {
                 .foregroundStyle(Color(hex: "6B7078"))
         }
         .onAppear { spin = true }
+        .onChange(of: progress) { new in
+            lastProgress = new
+        }
     }
 }
