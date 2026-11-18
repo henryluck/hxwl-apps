@@ -64,16 +64,22 @@ struct CleanHomeTab: View {
     let context: PluginContext
     var onDepthChange: ((Bool) -> Void)? = nil
 
-    /// 需求6：已订阅冷启动会员标识状态错误——根因是 AnyPayService 此前不转发
-    /// objectWillChange，StoreKit 异步恢复购买后首页收不到通知（原 1.5s 单次轮询
-    /// 在 StoreKit 慢于窗口时漏掉）。AnyPayService 已改为转发 objectWillChange
-    /// （见 Capabilities.swift），首页会员标识随 isPro 翻转立即重渲染，无需轮询。
-    @State private var refresh = false
+    /// row39修复：直接观察 pay 的 objectWillChange，StoreKit 异步恢复购买后
+    /// 首页会员标识立即刷新（原 _ = refresh 脆弱模式在某些 SwiftUI 版本下
+    /// 不触发重算，导致冷启动已订阅但首页显示未开通）。
+    /// context.pay 运行时是 AnyPayService（ObservableObject），用 @ObservedObject 观察。
+    @ObservedObject private var payObserver: AnyPayService
 
-    /// 当前是否已订阅（每次 body 重算，不受快照影响）
+    /// 当前是否已订阅（每次 body 重算，直接读 pay.isPro）
     private var isProNow: Bool {
-        _ = refresh  // 依赖 refresh 触发重算
-        return context.pay.isPro
+        payObserver.isPro
+    }
+
+    init(context: PluginContext, onDepthChange: ((Bool) -> Void)? = nil) {
+        self.context = context
+        self.onDepthChange = onDepthChange
+        // 工厂装配时 pay 一定是 AnyPayService（Capabilities.swift 里创建的）
+        self._payObserver = ObservedObject(wrappedValue: context.pay as! AnyPayService)
     }
 
     fileprivate func reportDepth(_ depth: Bool) {

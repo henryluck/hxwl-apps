@@ -52,6 +52,8 @@ public final class NavEngine: ObservableObject {
 
     private var requestCounter = 0
     private var startInFlight = false
+    /// 【Bug 行37】启动代次：cancelPendingStart / 新 start 递增，旧代次的异步续体全部作废
+    private var startGeneration = 0
     private var currentRequestId = ""
     /// 当前会话是否用模拟导航（模拟器验证用；真机 GPS）
     private var emulatorSession = false
@@ -171,28 +173,44 @@ public final class NavEngine: ObservableObject {
 
         startInFlight = true
         phase = .starting
+        // 【Bug 行37】启动代次令牌：用户在"规划中"退出页面/取消后，晚到的定位与
+        // 会话建立必须作废——否则在其他页面突然切进导航模式
+        startGeneration += 1
+        let generation = startGeneration
         defer { startInFlight = false }
-
         // 实时导航必须从设备真实位置起步；位置不可用直接失败分流。
         // 【Bug 行29】单次定位偶发超时/弱信号（室内边缘常见）会让用户"提示不成功、
         // 多试几次才能进"——改为失败后自动补一炮（800ms 间隔），两次都失败才报错。
         // 【Bug 行37】首炮超时 8→5s：规划刚完成时快照新鲜（秒开），只有快照过期后才
         // 走真定位；5s 内拿不到就补炮（10s），总最坏耗时从 ~19s 收敛到 ~16s 且更早失败提示。
-        guard let fix = await location.requestSingleFix(timeout: 5), fix.isUsable else {
+        var fix = await location.requestSingleFix(timeout: 5)
+        if !(fix?.isUsable ?? false) {
             try? await Task.sleep(nanoseconds: 800_000_000)
-            guard let retry = await location.requestSingleFix(timeout: 10), retry.isUsable else {
-                if !location.authState.isUsable {
-                    phase = .ready
-                    throw StartFailure.location(location.authState == .servicesOff ? .locationServicesOff : .locationDenied)
-                }
-                phase = .ready
-                throw StartFailure.location(.locationUnavailable)
-            }
-            beginSession(route: route, origin: retry.place, destination: destination)
+            fix = await location.requestSingleFix(timeout: 10)
+        }
+        // 【Bug 行37】代次已过期（用户已离开/再次点击）→ 丢弃本次启动
+        guard generation == startGeneration else {
+            if phase == .starting { phase = .ready }
             return
         }
+        guard let f = fix, f.isUsable else {
+            if !location.authState.isUsable {
+                phase = .ready
+                throw StartFailure.location(location.authState == .servicesOff ? .locationServicesOff : .locationDenied)
+            }
+            phase = .ready
+            throw StartFailure.location(.locationUnavailable)
+        }
+        beginSession(route: route, origin: f.place, destination: destination)
+    }
 
-        beginSession(route: route, origin: fix.place, destination: destination)
+    /// 【Bug 行37】用户取消/离开规划页时作废在途的启动流程（诱导面板显示规划中，
+    /// 后台不再继续调度 → 不会在其他页面突然进入导航模式）
+    public func cancelPendingStart() {
+        guard phase == .starting else { return }
+        startGeneration += 1   // 作废所有在途 start()
+        phase = .ready
+        Log.info("[Engine] 取消在途导航启动（用户离开规划页）")
     }
 
     private func beginSession(route: RouteOption, origin: Place, destination: Place) {
@@ -300,21 +318,31 @@ public final class NavEngine: ObservableObject {
     }
 
     /// 诱导图标类型（官方 AMapNaviIconType 原始值 → SF Symbol）
+    /// 【Bug 行30/40/45】按官方枚举精确映射（此前整体错位一格，面板方向与语音/实际相反）：
+    /// 0无 1车标 2左转 3右转 4左前 5右前 6左后 7右后 8左转掉头 9直行 10途经点
+    /// 11进环岛 12出环岛 13服务区 14收费站 15目的地 16隧道 19右转掉头 20顺行
     public var maneuverIconName: String {
         let t = liveInfo?.iconType ?? -1
-        // AMapNaviIconType：1 左转 2 右转 3 直行 4 左前方 5 右前方 6 左后方 7 右后方
-        // 8 左转掉头 9 直行掉头 10 右转掉头 11 靠左 12 靠右 ...
         switch t {
-        case 1: return "arrow.turn.up.left"
-        case 2: return "arrow.turn.up.right"
-        case 4: return "arrow.up.left"
-        case 5: return "arrow.up.right"
-        case 6: return "arrow.down.left"
-        case 7: return "arrow.down.right"
-        case 8: return "arrow.uturn.left"
-        case 10: return "arrow.uturn.right"
-        case 11: return "arrow.up.left.to.line"
-        case 12: return "arrow.up.right.to.line"
+        case 2: return "arrow.turn.up.left"          // 左转
+        case 3: return "arrow.turn.up.right"         // 右转
+        case 4: return "arrow.up.left"               // 左前方
+        case 5: return "arrow.up.right"              // 右前方
+        case 6: return "arrow.down.left"             // 左后方
+        case 7: return "arrow.down.right"            // 右后方
+        case 8: return "arrow.uturn.left"            // 左转掉头
+        case 9: return "arrow.up"                    // 直行
+        case 10: return "mappin.and.ellipse"         // 到达途经点
+        case 11, 17, 21, 22, 23, 25, 26, 27: return "arrow.triangle.merge"   // 进环岛系
+        case 12, 18: return "arrow.triangle.branch.exit"                      // 出环岛系
+        case 13: return "house.fill"                 // 服务区
+        case 14: return "building.columns.fill"      // 收费站
+        case 15: return "flag.checkered"             // 到达目的地
+        case 16: return "triangle.lefthalf.filled"   // 隧道
+        case 19: return "arrow.uturn.right"          // 右转掉头
+        case 20: return "arrow.up.to.line"           // 顺行
+        case 29: return "figure.walk"                // 人行横道
+        case 30: return "figure.walk"                // 过街天桥
         default: return "arrow.up"
         }
     }
@@ -331,27 +359,28 @@ public final class NavEngine: ObservableObject {
 
     static func iconActionText(_ type: Int) -> String {
         switch type {
-        case 1: return "左转"
-        case 2: return "右转"
-        case 3: return "直行"
+        case 2: return "左转"
+        case 3: return "右转"
         case 4: return "向左前方行驶"
         case 5: return "向右前方行驶"
         case 6: return "向左后方行驶"
         case 7: return "向右后方行驶"
         case 8: return "左转掉头"
-        case 9: return "直行掉头"
-        case 10: return "右转掉头"
-        case 11: return "靠左行驶"
-        case 12: return "靠右行驶"
-        case 13: return "进入环岛"
-        case 14: return "通过环岛"
-        case 15: return "驶出环岛"
-        case 16: return "到达目的地"
-        case 17: return "到达途经点"
-        case 20: return "进入匝道"
-        case 21: return "驶出匝道"
-        case 22: return "通过人行横道"
-        case 23: return "通过收费站"
+        case 9: return "直行"
+        case 10: return "到达途经点"
+        case 11, 17, 21, 22, 23, 24: return "进入环岛"
+        case 12, 18: return "驶出环岛"
+        case 25, 26: return "绕环岛左转"
+        case 27, 28: return "绕环岛右转"   // 25-28 标准小环岛细分，文案归并
+        case 13: return "到达服务区"
+        case 14: return "通过收费站"
+        case 15: return "到达目的地"
+        case 16: return "进入隧道"
+        case 19: return "右转掉头"
+        case 20: return "顺行"
+        case 29: return "通过人行横道"
+        case 30: return "通过过街天桥"
+        case 31: return "通过地下通道"
         default: return "继续前行"
         }
     }

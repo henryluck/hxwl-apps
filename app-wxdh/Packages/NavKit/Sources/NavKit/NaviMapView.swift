@@ -243,8 +243,21 @@ public final class PlanMapHolder: ObservableObject {
         }
     }
 
+    /// 全览路线【Bug 行35/34/39/44】
+    /// 此前用 center+span 手算，两个问题：
+    /// ① 竖屏下经度跨度 ×1.5 被过分放大，整条路线缩成一小段（比例太小看不清）；
+    /// ② 首次进页无路线数据时直接 return，地图停在默认「全国视野」（中国地图）。
+    /// 改用 MAMapSetRect 按路线边界矩形 + 像素内边距适配（任何屏幕比例都撑满可视区）。
     public func fit(routes: [RouteOption]) {
-        guard let map = mapView, !routes.isEmpty else { return }
+        guard let map = mapView else { return }
+        guard !routes.isEmpty else {
+            // 无路线兜底：视野回到用户当前位置（而不是全国地图）
+            if let loc = map.userLocation.location {
+                map.setCenter(loc.coordinate, animated: true)
+                map.setZoomLevel(15, animated: true)
+            }
+            return
+        }
         var minLat = 90.0, maxLat = -90.0, minLon = 180.0, maxLon = -180.0
         for route in routes {
             for c in route.polyline {
@@ -253,11 +266,30 @@ public final class PlanMapHolder: ObservableObject {
             }
         }
         guard minLat <= maxLat else { return }
-        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
-                                            longitude: (minLon + maxLon) / 2)
-        let span = MACoordinateSpan(latitudeDelta: max(0.02, (maxLat - minLat) * 1.5),
-                                    longitudeDelta: max(0.02, (maxLon - minLon) * 1.5))
-        map.setRegion(MACoordinateRegion(center: center, span: span), animated: true)
+
+        // 路线边界 → MAMapRect（Mercator）→ 可视区域（按像素内边距适配任意屏幕比例）
+        let southWest = MAMapPointForCoordinate(CLLocationCoordinate2D(latitude: minLat, longitude: minLon))
+        let northEast = MAMapPointForCoordinate(CLLocationCoordinate2D(latitude: maxLat, longitude: maxLon))
+        let rect = MAMapRect(origin: MAMapPoint(x: min(southWest.x, northEast.x),
+                                                y: min(southWest.y, northEast.y)),
+                             size: MAMapSize(width: abs(northEast.x - southWest.x),
+                                             height: abs(northEast.y - southWest.y)))
+        // 像素边距：上 120（起终点栏）、左 40、下 = 屏高 42%（底部卡片遮挡区）、右 40
+        let bottomPadding: CGFloat = map.frame.height * 0.42 + 40
+        map.setVisibleMapRect(rect,
+                              edgePadding: UIEdgeInsets(top: 120, left: 40,
+                                                        bottom: bottomPadding, right: 40),
+                              animated: true)
+    }
+
+    /// 地图就绪/重进规划页时的默认视野：回到用户位置（【Bug 行33/44】导航结束回来
+    /// 显示偏离/全国地图——每次规划页出现且无路线时重置到当前位置）
+    public func resetToUserLocation() {
+        guard let map = mapView else { return }
+        if let loc = map.userLocation.location {
+            map.setCenter(loc.coordinate, animated: false)
+            map.setZoomLevel(15, animated: false)
+        }
     }
 
     private init() {}

@@ -5,17 +5,18 @@ import WebKit
 // MARK: - 我的 · 关于我们页 + 协议正文浏览（离线 HTML，无需外链）
 
 /// 「关于我们」页：产品定位、核心功能、主体信息、版本。
+/// 【Bug 行42】协议入口已移除（「我的」里有，此页不再重复）；onOpenLegal 保留参数
+/// 兼容调用方，内部不再使用。
 struct AboutScreen: View {
     let appName: String
     let version: String
-    var onOpenLegal: (LegalDocPresenter.Doc) -> Void
+    var onOpenLegal: (LegalDocPresenter.Doc) -> Void = { _ in }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
                 hero
                 featuresCard
-                legalCard
                 companyCard
                 Text("本应用提供卫星地图定位、罗盘方位与出行天气服务，"
                      + "数据仅用于功能呈现，请遵守当地法律法规使用。")
@@ -34,11 +35,22 @@ struct AboutScreen: View {
 
     private var hero: some View {
         VStack(spacing: 10) {
-            Image(systemName: "location.marks.viewfinder")
-                .font(.system(size: 44, weight: .medium))
-                .foregroundStyle(NavTheme.accentDeep)
-                .padding(18)
-                .background(Circle().fill(NavTheme.panel))
+            // 【Bug 行42】App 真实 logo（assets/icon.png），此前是 SF Symbol 图标（白圈观感）
+            if let url = Bundle.main.resourceURL?.appendingPathComponent("assets/icon.png"),
+               let image = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 84, height: 84)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .shadow(color: Color.black.opacity(0.10), radius: 10, y: 3)
+            } else {
+                Image(systemName: "location.marks.viewfinder")
+                    .font(.system(size: 44, weight: .medium))
+                    .foregroundStyle(NavTheme.accentDeep)
+                    .padding(18)
+                    .background(Circle().fill(NavTheme.panel))
+            }
             Text(appName)
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(NavTheme.ink)
@@ -85,37 +97,8 @@ struct AboutScreen: View {
         .background(NavTheme.cardGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var legalCard: some View {
-        VStack(spacing: 0) {
-            legalRow(title: "用户协议", doc: .terms)
-            Divider().overlay(NavTheme.line).padding(.leading, 44)
-            legalRow(title: "隐私政策", doc: .privacy)
-        }
-        .background(NavTheme.cardGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func legalRow(title: String, doc: LegalDocPresenter.Doc) -> some View {
-        Button { onOpenLegal(doc) } label: {
-            HStack(spacing: 10) {
-                Image(systemName: doc == .privacy ? "hand.raised.fill" : "doc.text.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(NavTheme.accent)
-                    .frame(width: 22)
-                Text(title)
-                    .font(.system(size: 15))
-                    .foregroundStyle(NavTheme.ink)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(NavTheme.inkMute.opacity(0.6))
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 48)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
+    // 【Bug 行42】legalCard 已移除：用户协议/隐私政策在「我的」里已有入口，
+    // 关于我们页重复展示——按反馈删除。
 
     private var companyCard: some View {
         VStack(spacing: 0) {

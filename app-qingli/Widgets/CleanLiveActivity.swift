@@ -7,28 +7,40 @@ import WidgetKit
 // 由本 target 直接编译该文件共享（xcodegen sources 含该路径）。
 
 /// 卡片内容里显示 App 真实图标。
-/// 关键：图标 PNG 以「散资源文件」形式内置在 Widget 扩展 bundle 里，运行时直读——
-/// 不是 Asset Catalog！Asset Catalog 的 imageset 会被 actool deepmap2 压缩，
-/// 在 Live Activity 渲染进程里解码失败，图标渲染成黑块。
-/// 散 PNG + Bundle(for:).url + UIImage(contentsOfFile:) 完全绕开 actool 编译期处理。
+///
+/// 图标加载采用三层防御（Bug表 R33「锁屏实时活动卡片图标不对，应该本app图标」）：
+///  1. `UIImage(named: "LiveActivityIcon")` —— 扩展自带 Asset Catalog（Widgets/Assets.xcassets），
+///     actool 正常编译打包，是 Live Activity 官方推荐路径。
+///  2. `UIImage(named: "AppIcon")` —— 宿主 App 的 Asset Catalog 图标（主 App bundle 内）。
+///  3. 散资源 `AppIcon.bin` —— PNG 数据直读（`UIImage(contentsOfFile:)`），
+///     绕开 actool/pngcrush 对 PNG 内部格式的改写，作为最后兜底。
+///
+/// 历史坑（勿回退）：
+/// - actool 编译期的 imageset 会被 deepmap2 压缩，改写 PNG 内部格式，
+///   在 Live Activity 渲染进程解码失败 → 图标渲染成黑块。故额外保留 `.bin` 散资源。
+/// - Xcode 的 Copy Bundle Resources 阶段会 pngcrush 压缩 `.png`，
+///   故散资源用 `.bin` 扩展名让 Xcode 原样拷贝，运行时按路径直读 PNG 数据。
+/// - `Bundle(for:)` 用本类所在 bundle（Widget 扩展）取资源，比 `Bundle.main` 可靠：
+///   Live Activity 渲染进程的 Bundle.main 可能指向 SpringBoard 而非扩展 bundle。
+///   故不再用 Bundle.main 作为首查目标。
 struct AppIconView: View {
     var size: CGFloat
 
     /// 进程内只加载一次。
-    /// 文件用 .bin 扩展名内置在 Widget 扩展 bundle 里——不是 .png！
-    /// 因为 Xcode 的 Copy Bundle Resources 阶段会对 .png 文件做 pngcrush 压缩，
-    /// 修改 PNG 内部格式，导致 Live Activity 渲染进程解码失败。
-    /// .bin 扩展名让 Xcode 原样拷贝，运行时按路径直读 PNG 数据。
-    /// Bundle(for:) 从本类所在 bundle（Widget 扩展）取资源——比 Bundle.main 可靠：
-    /// Live Activity 渲染进程的 Bundle.main 可能指向 SpringBoard 而非扩展 bundle。
-    /// 两种都试一遍兜底。失败返回 nil，body 里走兜底色块。
     private static let icon: UIImage? = {
+        // ① 扩展自带 Asset Catalog
+        if let image = UIImage(named: "LiveActivityIcon") {
+            return image
+        }
+        // ② 宿主 App 的 AppIcon（actool 编译产物）
+        if let image = UIImage(named: "AppIcon") {
+            return image
+        }
+        // ③ 散资源直读（PNG 数据，扩展名为 .bin 以规避 pngcrush）
         let bundle = Bundle(for: AppIconViewMarker.self)
-        for b in [bundle, Bundle.main] {
-            if let url = b.url(forResource: "AppIcon", withExtension: "bin"),
-               let image = UIImage(contentsOfFile: url.path) {
-                return image
-            }
+        if let url = bundle.url(forResource: "AppIcon", withExtension: "bin"),
+           let image = UIImage(contentsOfFile: url.path) {
+            return image
         }
         return nil
     }()
@@ -37,11 +49,13 @@ struct AppIconView: View {
         if let icon = Self.icon {
             Image(uiImage: icon)
                 .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fill)
                 .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: size * 0.225))
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
         } else {
             // 兜底：图标加载失败时显示品牌色方块，不留空白
-            RoundedRectangle(cornerRadius: size * 0.225)
+            RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
                 .fill(Color(red: 0.55, green: 0.89, blue: 0.68))
                 .frame(width: size, height: size)
                 .overlay(

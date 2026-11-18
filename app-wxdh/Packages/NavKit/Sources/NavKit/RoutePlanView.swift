@@ -27,7 +27,14 @@ struct RoutePlanView: View {
                 // 【Bug 行35】onMapReady：地图初始化完成后重画路线——.task 可能先于
                 // 地图挂载执行，首帧画到空地图上导致"进规划页看不到路线"
                 AMapPlanMapView(onUserInteraction: { }, onMapReady: {
-                    refreshPlanMap()
+                    // 【Bug 行33/44·修复静态初始化崩溃】视野重置也移到地图就绪后——
+                    // onAppear 阶段直接访问 map.userLocation 会驱动 MAMapKit 内部
+                    // 纹理管理器提前构造（vmap GlobalCustomTextureObserver 崩溃）
+                    if model.engine.routes.isEmpty {
+                        PlanMapHolder.shared.resetToUserLocation()
+                    } else {
+                        refreshPlanMap()
+                    }
                 })
                 .ignoresSafeArea()
 
@@ -48,13 +55,19 @@ struct RoutePlanView: View {
             if model.engine.routes.isEmpty, model.destination != nil {
                 await model.plan()
             }
-            refreshPlanMap()
+            // 视野重置已移到 onMapReady（地图未就绪时访问 userLocation 会触发
+            // MAMapKit 静态构造崩溃——vmap 纹理管理器）
         }
         .onChange(of: model.engine.selectedRouteId) { _ in
             refreshPlanMap()
         }
         .onChange(of: model.engine.routes.count) { _ in
             refreshPlanMap()
+        }
+        .onDisappear {
+            // 【Bug 行37/38】任何方式离开规划页（切 tab/进搜索）都作废在途启动，
+            // 防止"其他页面突然进入导航模式"
+            model.engine.cancelPendingStart()
         }
     }
 
@@ -400,6 +413,9 @@ struct RoutePlanView: View {
     // MARK: - 动作
 
     private func back() {
+        // 【Bug 行37】退出规划页时作废在途的导航启动（否则晚到的定位成功
+        // 会把用户突然拽进导航模式）
+        model.engine.cancelPendingStart()
         if model.planSource == .nearby, model.nearbyCategory != nil {
             model.backToNearbyList()
         } else {

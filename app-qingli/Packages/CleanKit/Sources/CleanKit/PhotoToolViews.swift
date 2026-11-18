@@ -140,17 +140,25 @@ extension CGImagePropertyOrientation {
     }
 }
 
-/// 工具页大图（方形圆角 + 右下角效果标签）
+/// 工具页大图（圆角 + 右下角效果标签）
+/// Bug表row36修复：原用 scaledToFill + 固定 340x456 会裁切横向照片。
+/// 改为按原始宽高比缩放显示：以宽度 340 为基准，高度按比例计算（限 200~456），
+/// 不再裁切任何方向的照片。
 struct ToolHeroImage: View {
     let image: UIImage
     let badge: String?
 
     var body: some View {
+        let imgW = CGFloat(image.size.width)
+        let imgH = CGFloat(image.size.height)
+        let ratio = imgH > 0 ? imgW / imgH : 0.75
+        let viewWidth: CGFloat = 340
+        let viewHeight = max(200, min(456, viewWidth / ratio))
         ZStack(alignment: .bottomTrailing) {
             Image(uiImage: image)
                 .resizable()
-                .scaledToFill()
-                .frame(width: 340, height: 456)
+                .scaledToFit()
+                .frame(width: viewWidth, height: viewHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             if let badge {
                 Text(badge)
@@ -163,7 +171,7 @@ struct ToolHeroImage: View {
                     .padding(.bottom, 10)
             }
         }
-        .frame(width: 340, height: 456, alignment: .center)
+        .frame(width: viewWidth, height: viewHeight, alignment: .center)
         .frame(maxWidth: .infinity, alignment: .center)
     }
 }

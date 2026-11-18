@@ -282,9 +282,11 @@ public struct CleanHomeView: View {
             if scanner.isScanning {
                 // 需求2/3：扫描进度数字 0%→100% 动态累加、顺时针环形走满一圈
                 // （progress 直接观察单例，扫描中切 Tab 回来不重建状态、不错位）
+                // row39修复：扫描指示器用固定高度容器，避免扫描完成时高度骤变导致
+                // 下方推荐清理列表上下跳动（即"清理按钮上下浮动"问题）。
                 ScanningIndicator(label: scanner.phaseLabel,
                                   progress: scanner.progress)
-                    .padding(.vertical, 26)
+                    .frame(height: 180, alignment: .center)
             } else {
                 scoreRow
                 gaugeBar

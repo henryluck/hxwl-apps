@@ -525,9 +525,11 @@ public final class NavAppModel: ObservableObject {
         // plan() 才恢复可点（表现为"停止导航后按钮灰很久"）
         engine.returnToPlanning()
         flow = .plan
-        if let route = engine.selectedRoute {
-            mapController.showRoute(route.polyline, origin: originDisplay, destination: destination)
-            mapController.fitRoute()
+        // 【Bug 行39/44】回规划页重画刚才的路线并 fit（此前走 MapKit 的 mapController，
+        // 规划页已是高德地图，没画线 → 地图停留默认全国视野显示"中国地图"）
+        if !engine.routes.isEmpty {
+            PlanMapHolder.shared.showEndpoints(origin: originDisplay, destination: destination)
+            PlanMapHolder.shared.showRoutes(engine.routes, selectedId: engine.selectedRouteId)
         }
     }
 

@@ -248,7 +248,12 @@ public struct CleanDetailView: View {
         let cellHeight: CGFloat = 110
         let cellWidth = max(70, min(180, cellHeight * ratio))
         return Button {
-            if isSelected { selected.remove(asset.id) } else { selected.insert(asset.id) }
+            // row52 修复：勾选切换包 withAnimation，点击反馈立即渲染。
+            // 无动画时 SwiftUI 直接进入事务合并窗口，网格缩略图加载期间的
+            // 状态变更可能被攒到下一帧批量处理，视觉上「点了过一会才选中」。
+            withAnimation(.easeIn(duration: 0.12)) {
+                if isSelected { selected.remove(asset.id) } else { selected.insert(asset.id) }
+            }
         } label: {
             // 问题3修复：勾选 badge 走 AssetThumb 的 badge 插槽，
             // 在 GeometryReader 内部精确定位，保证圆点完整显示在格内右上角

@@ -268,6 +268,21 @@ public struct PaywallView: View {
                                               "eligibility": eligibility.rawValue,
                                               "source": variant == .startup ? "onboarding" : "gate"])
         }
+        // 【D1·1117 复盘移植】兜底→真实单向升级：决策链晚于首显 2s 窗落地且用户
+        // 还在本页 → 价格当场翻到真实套餐（如 5.8 → 0 元试用，与广告锚点一致），
+        // 不再「5.8 看到关页」。I-1 红线只放开这一向（真实→真实仍禁止热切换）。
+        .onReceive(strategyStore.$decision) { incoming in
+            guard freezeApplied,
+                  PaywallPlanCopyResolver.shouldUpgradeFrozenDecision(frozen: frozenDecision,
+                                                                      incoming: incoming),
+                  !purchasing, !restoring, !purchaseSuccess, legalDoc == nil
+            else { return }
+            frozenDecision = incoming
+            // 冻结决策与 StoreKit 价格快照同刻重建 → weeklyPurchaseTarget 随之切换，
+            // 展示=扣款（I-2 不破）；重试卡在场也可升（重试按升级后目标下单）
+            Task { await pay.reloadProducts() }
+            strategyStore.noteUpgraded()
+        }
         .onChange(of: canBreathe) { allowed in
             // 呼吸动效：90%→110%→90%，0.8 秒 ease-in-out 循环；
             // 处理中/覆盖弹层/后台/减少动态时恢复 100% 静态
@@ -541,10 +556,10 @@ public struct PaywallView: View {
     /// 【文案口径】统一模板（A/B/C/D 全套餐同格式）：
     ///   常规（含 5.8 / 8 / 1.8）：「新用户特惠首周¥X.X，之后¥58/周」
     ///   免费试用（A）：「新用户特惠免费试用3天，之后¥58/周」
-    /// 【样式】按钮上方价格说明：小号（12pt）、浅灰、不加粗（弱化说明文字，突出按钮）。
+    /// 【样式·Bug 行28】按钮上方价格说明：再小 2 号（12→10pt）、浅灰、不加粗。
     /// 续费价按生效套餐的 renew（B=58、C/D=48），StoreKit 实价优先。
     private var startupPriceLine: Text {
-        let size: CGFloat = 12
+        let size: CGFloat = 10
         let ink = Color(hex: "8A8F8C")   // 浅灰（说明性文字，不与正文抢视觉）
 
         // 生效价格：分流模式取决策套餐（A 试用 / B 5.8 / C 8 / D 1.8）；否则全局配置
@@ -899,6 +914,9 @@ public struct PaywallView: View {
         guard target == .weekly else { return nil }
         // 【Bug 行3】有首期价时加 "/周" 单位（此前 nil 导致单位缺失）
         if config.strategy == "free_trial" { return nil }
+        // 【Bug 行29】首周优惠价是一次性买断首周，不按周计费——单位 "/周" 去掉，
+        // 只显示「￥5.8」；无资格口径（周会员 ¥58/周）保留 /周
+        if introAvailable { return nil }
         return "/周"
     }
 

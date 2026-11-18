@@ -38,11 +38,13 @@ let package = Package(
             ],
             linkerSettings: [
                 .unsafeFlags([
-                    "-F\(vendor)",
-                    "-framework", "AMapFoundationKit",
-                    "-framework", "MAMapKit",
-                    "-framework", "AMapSearchKit",
-                    "-framework", "AMapNaviKit",
+                    // 【vmap 静态构造崩溃修复】高德四个 SDK 不在这里 -framework 链接：
+                    // 宿主工程已通过 xcframework 链接（project.yml dependencies）。
+                    // 此前这里 -F Vendor/AMap + -framework MAMapKit 会让链接器再从
+                    // 同目录的旧 fat .framework 链入第二份归档 → 每个符号两份拷贝
+                    //（nm 可见 vmap 符号成对出现）→ C++ 全局构造双重执行 →
+                    // GlobalCustomTextureObserver 读到野指针（EXC_BAD_ACCESS）。
+                    // 包内只需头文件/模块搜索（swiftSettings 的 -I/-F 已覆盖）。
                     "-lc++",                    // 高德 SDK 内部使用 C++（zip/异常等）
                     "-lz",                      // 高德 SDK 内置 zip 依赖 zlib
                     // 高德 SDK 依赖的系统框架

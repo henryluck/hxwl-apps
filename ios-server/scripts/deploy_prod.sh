@@ -277,7 +277,7 @@ server {
     gzip_min_length 1024;
     gzip_types text/plain text/css application/javascript application/json image/svg+xml;
 
-    location ~* \.(html|htm|css|js|png|jpe?g|gif|svg|ico|woff2?|ttf|map)\$ {
+    location ~* \.(html|htm|css|js|png|jpe?g|gif|svg|ico|woff2?|ttf|map|mp4|webm|mov|m4v)\$ {
         expires 1h;
         add_header Cache-Control "public";
         try_files \$uri =404;

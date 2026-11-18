@@ -123,17 +123,25 @@ struct WeatherScreen: View {
         .shadow(color: Color(hex: "163D28").opacity(0.33), radius: 8, x: 0, y: 1)
     }
 
-    /// 顶部标题栏：原型「天气」+ 白色胶囊（我的 | 会员）——统一组件 AccountMemberCapsule
+    /// 顶部标题栏：与其他 tab 一致的墨绿标题（#193E30）+ 白胶囊。
+    /// 【Bug 行41】天气页照片区顶部加深绿实体条保证墨绿标题可读
+    /// （此前白标题与其他 tab 观感不一致）。
     private var pageTitleBar: some View {
         HStack {
             Text("天气")
                 .font(.system(size: 23, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color(hex: "193E30"))
             Spacer()
-            AccountMemberCapsule(model: model, onDarkBackground: true)
+            AccountMemberCapsule(model: model, onDarkBackground: false)
         }
         .padding(.horizontal, 20)
         .padding(.top, 10)
+        .padding(.bottom, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            // 标题条底色：浅绿纸面色（照片顶部过渡），保证墨绿标题与照片解耦
+            Color(hex: "E9F6EC")
+        )
     }
 
     /// 城市行（21pt + 下箭头）+ 日期行（含「· 当前位置」）
@@ -192,10 +200,14 @@ struct WeatherScreen: View {
 
                 VStack(alignment: .leading, spacing: 9) {
                     HStack(spacing: 9) {
+                        // 【Bug 行41】实况图标着色：太阳用黄色（和风晴天视觉惯例），
+                        // 其余天气用白色（深色照片背景上清晰可见）；文字统一白色
                         Image(systemName: WeatherCode.icon(snapshot.current.code))
                             .font(.system(size: 26))
+                            .foregroundStyle(weatherIconColor(snapshot.current.code))
                         Text(WeatherCode.text(snapshot.current.code))
                             .font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(.white)
                     }
                     if let day = snapshot.days.first {
                         Text(String(format: "%.0f° ～ %.0f°", day.min, day.max))
@@ -263,6 +275,11 @@ struct WeatherScreen: View {
         default: scale = 8
         }
         return "\(scale)级"
+    }
+
+    /// 【Bug 行41】实况图标颜色：晴天黄太阳、其余白（照片深背景可读）
+    private func weatherIconColor(_ code: Int) -> Color {
+        WeatherCode.isSunny(code) ? Color(hex: "FFC531") : .white
     }
 
     // MARK: - 白色大卡：日出日落 + 分段 + 内容

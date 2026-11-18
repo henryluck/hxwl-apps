@@ -82,13 +82,21 @@ struct ShellRootView: View {
             await capabilities.pay.refreshEntitlement()
             entitlementReady = true
             tryTriggerPaywall()
+            // 未订阅召回通知：启动（权益就绪后）同步排班
+            await RetentionLocalNotifications.sync(pay: capabilities.pay)
+            await RetentionLocalNotifications.scheduleVerificationBannerIfRequested()
         }
         .onChange(of: scenePhase) { phase in
             // 回到前台重查权益：isPro 只在启动/购买/交易更新时刷新，
             // App 一直开着跨过到期点（沙盒几分钟一期）不会自动变回未订阅。
             // 各处横幅/订阅墙短路读的都是实时 isPro，此处刷新后 UI 随之更新。
             if phase == .active {
-                Task { await capabilities.pay.refreshEntitlement() }
+                Task {
+                    await capabilities.pay.refreshEntitlement()
+                    // 订阅状态可能在后台变化（沙盒续期/到期/退款）→ 回前台收敛通知排班：
+                    // 未订阅保证已排，已订阅则清掉全部召回通知
+                    await RetentionLocalNotifications.sync(pay: capabilities.pay)
+                }
             }
         }
         .onAppear {
@@ -149,6 +157,9 @@ struct ShellRootView: View {
                 DispatchQueue.main.async {
                     PermissionPrimer.requestStartupPermissionsIfNeeded()
                 }
+                // 未订阅召回通知：引导走完再同步（通知权限刚被 PermissionPrimer 申请，
+                // 授权成功的未订阅用户此时才具备排班条件）
+                Task { await RetentionLocalNotifications.sync(pay: capabilities.pay) }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .switchPluginTab)) { note in
@@ -306,6 +317,10 @@ struct ShellRootView: View {
     }
 
     /// 触发订阅页（isPro 短路 + 防重入）
+    /// row47修复：启动时 splash 序列在 FactoryApp 层并行播放，tryTriggerPaywall
+    /// 可能在 splash 还在显示时就触发 showPaywall=true，导致 splash 淡出后
+    /// 订阅页已盖在主界面上（用户看到"订阅页先于启动页出现"）。
+    /// 修复：非引导期的冷启动补弹改为延迟到 splash 结束后再触发。
     private func tryTriggerPaywall() {
         // UI 测试钩子：-uitest-no-paywall 彻底跳过订阅墙/挽留页弹窗。
         // 背景：R4 规则里「bootCount>=1 的未订阅用户每次冷启动都召回」，
@@ -335,7 +350,13 @@ struct ShellRootView: View {
         if capabilities.pay.hasSubscriptionHistory || bootCount >= 1
             || (!seenPaywall && !isFirstLaunchWithOnboarding) {
             didTriggerPaywall = true
-            DispatchQueue.main.async { showPaywall = true }
+            // row47修复：延迟 2 秒等 splash 序列结束后再弹订阅页。
+            // splash 序列最长约 1.5s（静态图）+ 视频时长，2 秒足够覆盖静态图阶段；
+            // 有视频时 splash 会更长，但视频播放期间订阅页 cover 已就绪只是被盖住，
+            // splash 淡出后自然露出——不会出现"先看到订阅页再看到启动页"的反序。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                showPaywall = true
+            }
         }
     }
 

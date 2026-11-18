@@ -17,6 +17,10 @@ import UserNotifications
 /// 时序说明：系统权限弹窗会盖住任何界面，故等引导流程结束、主界面出现时才触发；
 /// 老用户（已完成引导）冷启动进主界面即触发。一次性门控：整个授权流程启动后不再重复，
 /// 避免用户拒绝后每次启动都被打扰（用户拒绝后只能去设置里改）。
+///
+/// row51 修复：主界面出现后不再立即申请，延后 2.5s 再弹。原时机问题：
+/// onAppear/引导完成 onChange 立即申请 → ATT/通知系统弹窗与 2s 延迟弹出的
+/// 订阅墙、完成订阅页、挽留页在开局几秒内叠加轰炸（用户感知「弹窗时机不对」）。
 enum PermissionPrimer {
     /// 一次性门控 key（UserDefaults）
     private static let gateKey = "didRequestStartupPermissions"
@@ -29,6 +33,11 @@ enum PermissionPrimer {
         UserDefaults.standard.set(true, forKey: gateKey)
 
         Task { @MainActor in
+            // row51：延后到主界面出现 2.5s 后再申请——订阅墙（启动后 2s 弹出）
+            // 先完整呈现，用户关闭订阅墙/挽留页后权限弹窗才出现，不打断转化流程。
+            // 延迟期间用户杀掉 App 也无碍：门控已落，下次启动 onAppear 会因门控
+            // 短路不再重排（等价于自然放弃这次申请，避免反复打扰）。
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
             // ATT 与通知依次申请，避免两个系统弹窗叠加
             await requestTracking()
             await requestNotification()

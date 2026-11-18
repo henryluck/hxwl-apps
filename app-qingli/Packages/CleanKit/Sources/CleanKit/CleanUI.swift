@@ -179,13 +179,22 @@ public final class ThumbCache {
             PHImageManager.default().requestImage(for: asset, targetSize: size,
                                                   contentMode: .aspectFill, options: opts) { img, info in
                 let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if let img, !degraded {
-                    self.cache.setObject(img, forKey: assetID as NSString, cost: Int(img.size.width * img.size.height * 4))
-                }
-                // 防御：理论上 highQualityFormat 只回调一次，但 iCloud/异常路径若再回调
-                // 绝不能二次 resume（会崩）。重复回调仅更新缓存后忽略。
                 if degraded { return }
-                cont.resume(returning: img)
+                guard let img else {
+                    cont.resume(returning: nil)
+                    return
+                }
+                // row52 修复：后台线程预解码。
+                // PHImageManager 回调在主线程且 UIImage 未解码，SwiftUI 首绘时才在
+                // 主线程做 JPEG 解压——网格里几十张缩略图同时加载会把主线程打满，
+                // 点选事件的响应被排到解压任务之后（用户感知「点了过一会才选中」）。
+                // preparingForDisplay() 在后台完成解压，主线程只拿成品位图直接上屏。
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let prepared = img.preparingForDisplay() ?? img
+                    self.cache.setObject(prepared, forKey: assetID as NSString,
+                                         cost: Int(prepared.size.width * prepared.size.height * 4))
+                    cont.resume(returning: prepared)
+                }
             }
         }
     }
@@ -215,12 +224,18 @@ public final class ThumbCache {
             PHImageManager.default().requestImage(for: asset, targetSize: size,
                                                   contentMode: .aspectFit, options: opts) { img, info in
                 let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if let img, !degraded {
-                    self.cache.setObject(img, forKey: key,
-                                         cost: Int(img.size.width * img.size.height * 4))
-                }
                 if degraded { return }
-                cont.resume(returning: img)
+                guard let img else {
+                    cont.resume(returning: nil)
+                    return
+                }
+                // row52 修复：后台线程预解码（同 load(assetID:)，主线程不再做 JPEG 解压）
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let prepared = img.preparingForDisplay() ?? img
+                    self.cache.setObject(prepared, forKey: key,
+                                         cost: Int(prepared.size.width * prepared.size.height * 4))
+                    cont.resume(returning: prepared)
+                }
             }
         }
     }

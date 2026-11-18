@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		044F5228573C3FF686AA87FD /* Capabilities in Frameworks */ = {isa = PBXBuildFile; productRef = A817CD8E9511CFFB986F0396 /* Capabilities */; };
 		051645EDB1103A0BA72748CE /* spec.json in Resources */ = {isa = PBXBuildFile; fileRef = 401BF06EE0A2E44336BCDF1C /* spec.json */; };
-		0A402CB22A6D671AAFF91CE5 /* MAMapKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2C51527A7A1487098C6B2FAE /* MAMapKit.xcframework */; };
 		314C7B8F0966EB868E5910B2 /* AMap.bundle in Resources */ = {isa = PBXBuildFile; fileRef = E991C701A012FB9D98ADF9B0 /* AMap.bundle */; };
 		31A5B0CFE9ADB6FE0BDFB949 /* AMapFoundationKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D72D5219EEDD51FA5E3AAC0D /* AMapFoundationKit.xcframework */; };
 		336A6416EF4AF4CE0A255C18 /* DateUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9678CC45E481EF6083D55CD9 /* DateUtil.swift */; };
@@ -34,7 +33,6 @@
 /* Begin PBXFileReference section */
 		16BBC19FA488DFC709B5BDAA /* FactoryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactoryApp.swift; sourceTree = "<group>"; };
 		2731E15D308781546DBB24DD /* Capabilities */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Capabilities; path = Packages/Capabilities; sourceTree = SOURCE_ROOT; };
-		2C51527A7A1487098C6B2FAE /* MAMapKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = MAMapKit.xcframework; path = Vendor/AMap/MAMapKit.xcframework; sourceTree = "<group>"; };
 		33292DED9E150D3BA35CA61E /* AppSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSpec.swift; sourceTree = "<group>"; };
 		374C1BCB2150DAB7A778A3A2 /* CoreKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CoreKit; path = Packages/CoreKit; sourceTree = SOURCE_ROOT; };
 		401BF06EE0A2E44336BCDF1C /* spec.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = spec.json; sourceTree = "<group>"; };
@@ -67,7 +65,6 @@
 				D73BEFBB6A7A5D8DA4BC1836 /* BaseComponents in Frameworks */,
 				C95EF26746D5B71EA1C87D3E /* NavKit in Frameworks */,
 				31A5B0CFE9ADB6FE0BDFB949 /* AMapFoundationKit.xcframework in Frameworks */,
-				0A402CB22A6D671AAFF91CE5 /* MAMapKit.xcframework in Frameworks */,
 				479DD49C13C04F78D0289B1A /* AMapNaviKit.xcframework in Frameworks */,
 				6F258DE71FCB2CC80EB17391 /* AMapSearchKit.xcframework in Frameworks */,
 			);
@@ -91,7 +88,6 @@
 				D72D5219EEDD51FA5E3AAC0D /* AMapFoundationKit.xcframework */,
 				9FE616A39B4BDA9AF37CE6B7 /* AMapNaviKit.xcframework */,
 				DBC8CBDBD985DD0D69BD8DA6 /* AMapSearchKit.xcframework */,
-				2C51527A7A1487098C6B2FAE /* MAMapKit.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";

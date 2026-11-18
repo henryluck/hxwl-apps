@@ -216,7 +216,13 @@ public final class NaviService: NSObject, ObservableObject {
         viewKind = mode.naviKind
         prepareManager(for: mode.naviKind)
 
-        // ⚠️ continuation 必须在发起算路前登记好，回调可能极快（本地缓存路线）
+        // ⚠️ continuation 必须在发起算路前登记好，回调可能极快（本地缓存路线）。
+        // 【Bug 行36】新一轮算路先作废在途 continuation（旧请求晚到/无回调时直接吞掉），
+        // 防止重复进出页面累积悬挂 continuation 导致崩溃（resume 两次 = fatalError）。
+        if let stale = planContinuation {
+            planContinuation = nil
+            stale.resume(returning: PlanOutcome(routes: [], failure: .serviceError))
+        }
         return await withCheckedContinuation { (cont: CheckedContinuation<PlanOutcome, Never>) in
             self.planContinuation = cont
             let accepted: Bool
@@ -370,6 +376,8 @@ public final class NaviService: NSObject, ObservableObject {
     weak var activeNaviView: UIView?
     /// 到达回调（外部 NavEngine 接管终态处理）
     var onArrived: (() -> Void)?
+    /// 【Bug 行31/45】普通态计时起点（车标出画自动回锁车用）
+    var normalSince: Date?
 
     /// 全览当前路线（官方导航视图 showMode = .overview）
     public func displayOverview() {
@@ -456,6 +464,37 @@ extension NaviService: AMapNaviDriveDataRepresentable {
                                          segmentRemainDistance: Int(info.segmentRemainDistance),
                                          segmentRemainTime: Int(info.segmentRemainTime),
                                          iconType: Int(info.iconType.rawValue))
+            self.relockIfCarOffscreen()   // 【Bug 行31/45】车标出画自动回锁车车
+        }
+    }
+
+    /// 【Bug 行31/45】用户拖图进普通态后 SDK 停止跟随，车继续走会跑出屏幕。
+    /// 导航视图不暴露内部 MAMapView，无法按坐标判定出画——按时间兜底：
+    /// 普通态持续 8 秒（≈ 3 条诱导数据周期）后自动回锁车跟随（与高德官方
+    /// 「片刻浏览后自动回到跟随」的行为一致）。
+    public func relockIfCarOffscreen() {
+        guard isNavigating, let view = activeNaviView else { return }
+        let mode: Int
+        switch view {
+        case let v as AMapNaviDriveView: mode = v.showMode.rawValue
+        case let v as AMapNaviWalkView: mode = v.showMode.rawValue
+        case let v as AMapNaviRideView: mode = v.showMode.rawValue
+        default: return
+        }
+        if mode != 3 {   // 3 = normal 普通态
+            normalSince = nil
+            return
+        }
+        // 普通态计时：超过 8s 回锁车（用户短暂拖图浏览不受影响）
+        if normalSince == nil { normalSince = Date() }
+        if Date().timeIntervalSince(normalSince!) > 8 {
+            normalSince = nil
+            switch view {
+            case let v as AMapNaviDriveView: v.showMode = .carPositionLocked
+            case let v as AMapNaviWalkView: v.showMode = .carPositionLocked
+            case let v as AMapNaviRideView: v.showMode = .carPositionLocked
+            default: break
+            }
         }
     }
 }
@@ -617,6 +656,7 @@ extension NaviService: AMapNaviWalkDataRepresentable {
                                          segmentRemainDistance: Int(info.segmentRemainDistance),
                                          segmentRemainTime: Int(info.segmentRemainTime),
                                          iconType: Int(info.iconType.rawValue))
+            self.relockIfCarOffscreen()   // 【Bug 行31/45】普通态车标出画自动回锁
         }
     }
 }
@@ -632,6 +672,7 @@ extension NaviService: AMapNaviRideDataRepresentable {
                                          segmentRemainDistance: Int(info.segmentRemainDistance),
                                          segmentRemainTime: Int(info.segmentRemainTime),
                                          iconType: Int(info.iconType.rawValue))
+            self.relockIfCarOffscreen()   // 【Bug 行31/45】普通态车标出画自动回锁
         }
     }
 }

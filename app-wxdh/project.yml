@@ -11,6 +11,12 @@ packages:
   NavKit:
     path: Packages/NavKit
 targets:
+        FactoryCore: all
+    test:
+      targets:
+        - Package/Capabilities
+        - Package/BaseComponents
+targets:
   FactoryCore:
     type: application
     platform: iOS
@@ -38,9 +44,12 @@ targets:
       - package: BaseComponents
       - package: NavKit
       # 高德 iOS SDK（静态 xcframework：ios-arm64 设备切片 + arm64/x86_64 模拟器切片）
+      # 【vmap 崩溃修复】AMapNaviKit 内嵌完整 3D 地图（含 MAMapView 全部符号）——
+      # MAMapKit 与 AMapNaviKit 各自携带 vmap 纹理管理器，同时链接两份归档时
+      # C++ 全局构造双重执行 → GlobalCustomTextureObserver 野指针崩溃。
+      # 因此不再链接 MAMapKit.xcframework（MAMapView/MAMapViewDelegate 符号由
+      # AMapNaviKit 提供；MAMapKit.framework 仅作为头文件源保留在 Vendor 供 import）。
       - framework: Vendor/AMap/AMapFoundationKit.xcframework
-        embed: false
-      - framework: Vendor/AMap/MAMapKit.xcframework
         embed: false
       - framework: Vendor/AMap/AMapNaviKit.xcframework
         embed: false

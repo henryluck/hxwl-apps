@@ -180,4 +180,13 @@ public enum WeatherCode {
         default:                            return "cloud.fill"
         }
     }
+
+    /// 【Bug 行41】实况区图标颜色：晴天黄色太阳，其余白色（照片背景深色可读）。
+    /// SwiftUI Color 由视图层提供（服务层不依赖 SwiftUI）——这里返回语义标记。
+    public static func isSunny(_ code: Int) -> Bool {
+        switch code {
+        case 100, 150: return true
+        default: return false
+        }
+    }
 }

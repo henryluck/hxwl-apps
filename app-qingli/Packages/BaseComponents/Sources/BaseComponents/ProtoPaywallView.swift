@@ -84,10 +84,10 @@ public struct ProtoPaywallView: View {
                 Spacer(minLength: 286)
                 VStack(spacing: 0) {
                     Text("会员权益")
-                        .font(.system(size: 30, weight: .bold))
+                        .font(.system(size: 32, weight: .bold))
                         .foregroundStyle(titleBlack)
                     Text("释放更多空间，清理更高效")
-                        .font(.system(size: 15))
+                        .font(.system(size: 16))
                         .foregroundStyle(Color(hex: "8A9199"))
                         .padding(.top, 14)
 
@@ -162,7 +162,7 @@ public struct ProtoPaywallView: View {
                     AssetMedia(path: "assets/\(item.icon)", contentMode: .fit)
                         .frame(width: 24, height: 24)
                     Text(item.text)
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.system(size: 18, weight: .regular))
                         .foregroundStyle(titleBlack)
                 }
             }
@@ -243,7 +243,7 @@ public struct ProtoPaywallView: View {
         } label: {
             Group {
                 if purchasing { ProgressView().tint(.white) }
-                else { Text("下一步").font(.system(size: 20, weight: .medium)) }
+                else { Text("下一步").font(.system(size: 22, weight: .medium)) }
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
@@ -286,7 +286,7 @@ public struct ProtoPaywallView: View {
             plain(" 和 ")
             linkText("隐私政策") { openLegal(.privacy, url: config.privacyURL, html: config.privacyHTML) }
         }
-        .font(.system(size: 12))
+        .font(.system(size: 13))
         .multilineTextAlignment(.center)
     }
 
@@ -303,11 +303,11 @@ public struct ProtoPaywallView: View {
     }
 
     // MARK: - 顶部按钮（✕ / 恢复购买）
-
+    // row46修复：关闭按钮和恢复购买按钮字号略放大
     private var closeButton: some View {
         Button { closePaywall() } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(titleBlack.opacity(0.75))
                 .padding(9)
         }
@@ -324,7 +324,7 @@ public struct ProtoPaywallView: View {
             }
         } label: {
             Text("恢复购买")
-                .font(.system(size: 13))
+                .font(.system(size: 14))
                 .foregroundStyle(subGray)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)

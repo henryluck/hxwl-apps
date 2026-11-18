@@ -84,6 +84,10 @@ public final class PaywallStrategyStore: ObservableObject {
 
     /// 拉取决策：归因完成后调用（时序红线：先归因后决策）。
     /// 失败不覆盖既有决策（静默维持）；成功且 productId 合法才采纳。
+    /// 【D2·1117 复盘移植】fallback（DEFAULT）决策**不持久化**，且清掉旧兜底残留——
+    /// 此前 DEFAULT 被照常落盘 → 复访冷启 loadPersisted 秒回非 nil → waitForDecision
+    /// 被短路 → 在途的新鲜刷新（可能已能返回真实 A）被无视，每复访一次就再赌一次
+    /// 「刷新是否赶在打开订阅页前」。fallback 只活在当次会话（本会话展示口径不变）。
     public func refresh() async {
         guard !refreshing, let fetcher else { return }
         refreshing = true
@@ -101,26 +105,34 @@ public final class PaywallStrategyStore: ObservableObject {
                                      copy: remote.copy,
                                      isFallback: remote.plan == "DEFAULT")
             decision = d
-            persist(d)
+            if d.isFallback {
+                // 兜底不落盘 + 清残留：升版后旧持久化兜底自动清除，
+                // 复访冷启回到「无决策 → 有界等待」的正确路径
+                defaults.removeObject(forKey: Self.storageKey)
+            } else {
+                persist(d)
+            }
         } catch {
             // 接口失败：静默维持既有决策（可能为 nil=兜底）
             Log.error("[PaywallStrategy] 拉取失败（维持现状）: \(error.localizedDescription)")
         }
     }
 
-    /// 有界等待：订阅页展示前调用。已有决策秒回；无决策时最多等 timeout 秒后返回当前值（可能 nil=按兜底渲染）。
-    /// hasAttemptedRefresh 区分「还没轮到」（未尝试拉取）与「已尽力失败」。
+    /// 有界等待：订阅页展示前调用。
+    /// 【D2·1117 复盘移植】只认 `isFallback == false` 为「已到」；持有 fallback/nil 时
+    /// 继续等真实决策（或本轮刷新已尽力则秒回，保住「接口秒败秒过」不回退）——
+    /// 此前 `if let decision` 会把 fallback 也当已到，直接短路在途刷新。
     public func waitForDecision(timeout: TimeInterval = 2) async -> StrategyDecision? {
-        if let decision { return decision }
+        if let decision, !decision.isFallback { return decision }
         if !hasAttemptedRefresh {
             await refresh()
-            if let decision { return decision }
+            if let decision, !decision.isFallback { return decision }
         }
-        // 慢服务端：轮询等待最多 timeout
+        // 慢服务端：轮询等待最多 timeout（等真实决策顶替 fallback）
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             try? await Task.sleep(nanoseconds: 100_000_000)
-            if let decision { return decision }
+            if let decision, !decision.isFallback { return decision }
         }
         return decision
     }
@@ -133,6 +145,17 @@ public final class PaywallStrategyStore: ObservableObject {
                       "strategyId": d?.strategyId.map(String.init) ?? "",
                       "fallback": d.map { $0.isFallback ? "true" : "false" } ?? "true"]
         Task { await reporter?("paywall_strategy_show", params) }
+    }
+
+    /// 【D1·1117 复盘移植】兜底→真实升级埋点（paywall_strategy_upgrade）：
+    /// 命中率 = 本次修复的直接收益（首访被救回的比例）。
+    public func noteUpgraded() {
+        let d = decision
+        let params = ["plan": d?.plan ?? "UNDECIDED",
+                      "productId": d?.productId ?? defaultProductID,
+                      "strategyId": d?.strategyId.map(String.init) ?? "",
+                      "fallback": "false"]
+        Task { await reporter?("paywall_strategy_upgrade", params) }
     }
 
     private func persist(_ d: StrategyDecision) {

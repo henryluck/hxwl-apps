@@ -11,6 +11,10 @@ struct AltitudeScreen: View {
     @State private var showHistory = false
     @State private var note = ""
     @State private var copied = false
+    /// 【Bug 行43】重新定位的可见反馈：旋转动画 + 完成闪绿
+    @State private var locating = false
+    @State private var refreshedFlash = false
+    @State private var refreshSpin: Double = 360
     /// 未订阅时锁定数据展示（对齐原型 alt-page-v14 锁定态）：
     /// 大数字显示「——」占位，胶囊标签为固定 slogan，不暴露真实海拔/更新时间
     private var locked: Bool { !model.isUnlocked }
@@ -161,25 +165,44 @@ struct AltitudeScreen: View {
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(Color(hex: "193E30"))
                         .lineLimit(1)
-                    Text("当前位置")
+                    // 【Bug 行43】副行显示位置概要（地名全称/精度），不再固定「当前位置」
+                    Text(placeSummaryText)
                         .font(.system(size: 14))
                         .foregroundStyle(Color(hex: "536F60"))
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 8)
 
+                // 【Bug 行43】重新定位按钮：加载旋转动画 + 完成反馈（此前点击无响应感）
                 Button {
-                    Task { await model.locate() }
+                    guard !locating else { return }
+                    locating = true
+                    Task {
+                        await model.locate()
+                        // 短暂保留旋转动画，让用户看到刷新完成的过渡
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        locating = false
+                        refreshedFlash = true
+                        try? await Task.sleep(nanoseconds: 900_000_000)
+                        refreshedFlash = false
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 18))
-                        .foregroundStyle(Color(hex: "236949"))
+                        .foregroundStyle(refreshedFlash ? Color(hex: "087F5B") : Color(hex: "236949"))
                         .frame(width: 44, height: 44)
                         .background(Color.white, in: Circle())
-                        .overlay(Circle().strokeBorder(Color(hex: "DBE9DF"), lineWidth: 1))
+                        .overlay(Circle().strokeBorder(refreshedFlash ? Color(hex: "087F5B") : Color(hex: "DBE9DF"),
+                                                        lineWidth: 1))
+                        .rotationEffect(.degrees(locating ? refreshSpin : 0))
+                        .animation(locating
+                                   ? .linear(duration: 0.9).repeatForever(autoreverses: false)
+                                   : .easeOut(duration: 0.25),
+                                   value: locating)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("重新定位")
+                .accessibilityLabel(locating ? "正在重新定位" : "重新定位")
             }
             .padding(.bottom, 23)
 
@@ -276,6 +299,17 @@ struct AltitudeScreen: View {
     private var placeText: String {
         guard let snapshot else { return "位置暂不可用" }
         return snapshot.place.name.isEmpty ? "当前位置" : snapshot.place.name
+    }
+
+    /// 【Bug 行43】位置概要：地名全称（市/区）或坐标（反编码缺失时）
+    private var placeSummaryText: String {
+        guard let snapshot else { return "等待定位…" }
+        let place = snapshot.place
+        if !place.city.isEmpty || !place.district.isEmpty {
+            return [place.city, place.district].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+        if !place.address.isEmpty { return place.address }
+        return NavFormat.coordinate(snapshot.latitude, snapshot.longitude)
     }
 
     private var coordinateText: String {

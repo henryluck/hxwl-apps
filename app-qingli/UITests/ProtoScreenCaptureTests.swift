@@ -39,7 +39,10 @@ final class ProtoScreenCaptureTests: XCTestCase {
     private func handlePhotoPermissionDialog() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let candidates = ["允许完全访问", "允许访问所有照片", "Allow Full Access",
-                          "Allow Access to All Photos"]
+                          "Allow Access to All Photos",
+                          // iOS 26 新版照片权限弹窗（英文环境）：完整访问按钮文案
+                          "Allow Full Access & Keep Current Selection",
+                          "Allow Full Access"]
         for title in candidates {
             let btn = springboard.buttons[title]
             if btn.exists {

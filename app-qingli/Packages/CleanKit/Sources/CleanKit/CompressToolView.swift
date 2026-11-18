@@ -111,7 +111,12 @@ public struct CompressToolView: View {
         }
         .sheet(isPresented: $pickerOpen) {
             MediaPickerSheet(isVideo: mode == .video) { items in
-                picked = items
+                // row48修复：取消选择（items 为空）时不清空已有选择，
+                // 只在用户确实选了新照片时才替换。
+                if !items.isEmpty {
+                    picked = items
+                    pickedPage = 0   // 重置轮播页码，从第一张开始
+                }
             }
         }
         .onChange(of: done) { d in

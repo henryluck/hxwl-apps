@@ -118,6 +118,13 @@ struct ProtoArtPressStyle: ButtonStyle {
 }
 
 // MARK: - 完成订阅页（订阅成功后整屏）
+//
+// row50 修复（原 r25/row45 同源问题根治）：整页位图只有 1x 分辨率（402x874），
+// 位图文字在 3x 屏上必然发糊。重构为「插画位图 + 原生 SwiftUI」：
+//  - 顶部 3D 插画沿用位图（sub_success_hero.png，402x222，从原 sub_success.png 裁出，
+//    白卡及文字已全部裁掉）
+//  - 白卡（订阅成功 / 会员权益已生效 / 快来清理吧！/ 一键智能清理…+ 盾牌徽章）与
+//    底部「立即清理」按钮全部原生渲染，任意分辨率锐利。
 
 public struct ProtoSubscriptionSuccessView: View {
     let onStart: () -> Void
@@ -127,11 +134,73 @@ public struct ProtoSubscriptionSuccessView: View {
     }
 
     public var body: some View {
-        ProtoPageCanvas(asset: "assets/proto/sub_success.png") { k in
-            ProtoHitArea(x: 201, y: 714, width: 312, height: 68, scale: k, radius: 26,
-                         identifier: "subscribeSuccess.start", label: "立即清理",
-                         action: onStart)
+        GeometryReader { geo in
+            let w = geo.size.width
+            let k = w / protoCanvasWidth
+            ZStack(alignment: .topLeading) {
+                // 页面背景渐变（与原位图一致：顶部 C2F0D2 → 底部浅白绿）
+                LinearGradient(colors: [Color(hex: "C2F0D2"), Color(hex: "F2FDF5")],
+                               startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    // 顶部 3D 插画（位图，纯插画无文字）
+                    if let hero = protoPageImage("assets/proto/sub_success_hero.png") {
+                        Image(uiImage: hero)
+                            .resizable()
+                            .frame(width: w, height: 222 * k)
+                    }
+
+                    // ---- 白卡：原生渲染（替代位图烧录文字）----
+                    HStack(alignment: .center, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("订阅成功")
+                                .font(.system(size: 26, weight: .bold))
+                                .foregroundStyle(Color(hex: "2D302E"))
+                                .frame(maxWidth: .infinity, alignment: .center)
+                            Text("会员权益已生效")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(Color(hex: "2D302E"))
+                            Text("快来清理吧！")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(Color(hex: "2D302E"))
+                            Text("一键智能清理，释放更多空间")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Color(hex: "838884"))
+                        }
+                        Image(systemName: "checkmark.shield.fill")
+                            .font(.system(size: 52))
+                            .foregroundStyle(Color(hex: "217F5E"))
+                    }
+                    .padding(.horizontal, 26)
+                    .padding(.vertical, 30)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color(hex: "F2FDF5")))
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.9), lineWidth: 1))
+                    .padding(.horizontal, 18)
+
+                    Spacer(minLength: 24)
+
+                    // 立即清理（原生按钮，原位图热区 x53..349 / y689..738 → 高约 49pt，
+                    // 按现代规格放大到 54pt 提升可点性）
+                    Button(action: onStart) {
+                        Text("立即清理")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                    }
+                    .background(Capsule().fill(Color(hex: "5BC265")))
+                    .padding(.horizontal, 53 * k)
+                    .padding(.bottom, 136 * k)
+                    .accessibilityIdentifier("subscribeSuccess.start")
+                    .accessibilityLabel(Text("立即清理"))
+                }
+            }
+            .frame(width: w, height: geo.size.height)
         }
+        .ignoresSafeArea()
         // 注意：不要给容器加 accessibilityIdentifier —— SwiftUI 会把它传播到
         // 内部所有热区按钮上，覆盖掉按钮自己的 identifier，导致 UI 测试定位不到。
     }
@@ -220,10 +289,25 @@ public struct ProtoSubscribedView: View {
                     .padding(.horizontal, 30)
                 }
 
-                // 位图左上角 ✕ 的热区（✕ 保留在插画位图里，热区沿用原 identifier/位置）
-                ProtoHitArea(x: 36, y: 72, width: 48, height: 48, scale: k, radius: 24,
-                             identifier: "subscribed.close", label: "关闭",
-                             action: onClose)
+                // row45修复：原 ✕ 是位图上的透明热区，分辨率低视觉糊。
+                // 改为原生圆底关闭按钮，清晰锐利。
+                VStack {
+                    HStack {
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color(hex: "1A1A1A").opacity(0.6))
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(Color.white.opacity(0.9)))
+                        }
+                        .accessibilityIdentifier("subscribed.close")
+                        .accessibilityLabel("关闭")
+                        Spacer()
+                    }
+                    .padding(.leading, 16)
+                    .padding(.top, 8)
+                    Spacer()
+                }
             }
 
             // 「取消续费」→ 续订弹窗（如何取消自动续费）
@@ -251,6 +335,8 @@ public struct ProtoSubscribedView: View {
 }
 
 /// 续订弹窗：点 ✕ 或弹窗外空白关闭
+/// row45修复：原用整页位图 renew_guide.png，文字在 3x 屏上发糊。
+/// 改为原生 SwiftUI 渲染：白底圆角卡 + 标题 + 步骤说明 + 关闭按钮。
 public struct ProtoRenewGuideView: View {
     let onClose: () -> Void
 
@@ -259,10 +345,65 @@ public struct ProtoRenewGuideView: View {
     }
 
     public var body: some View {
-        ProtoPageCanvas(asset: "assets/proto/renew_guide.png", backgroundTap: onClose) { k in
-            ProtoHitArea(x: 357, y: 373, width: 46, height: 46, scale: k, radius: 23,
-                         identifier: "renewGuide.close", label: "关闭",
-                         action: onClose)
+        ZStack {
+            // 半透明遮罩
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture { onClose() }
+
+            VStack(spacing: 0) {
+                // 白底圆角卡
+                VStack(spacing: 16) {
+                    HStack {
+                        Text("如何取消自动续费")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(Color(hex: "1A1A1A"))
+                        Spacer()
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color(hex: "9AA09C"))
+                                .frame(width: 28, height: 28)
+                        }
+                        .accessibilityIdentifier("renewGuide.close")
+                        .accessibilityLabel("关闭")
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        renewalStep("1", "打开 iPhone「设置」")
+                        renewalStep("2", "点击顶部您的 Apple ID")
+                        renewalStep("3", "选择「订阅」")
+                        renewalStep("4", "找到「垃圾清理助手」并点击")
+                        renewalStep("5", "点击「取消订阅」即可完成")
+                    }
+                    .padding(.top, 4)
+
+                    Text("取消后当前订阅期内仍可享受会员权益")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color(hex: "9AA09C"))
+                        .padding(.top, 4)
+                }
+                .padding(24)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.white)
+                )
+            }
+            .padding(.horizontal, 32)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+        }
+    }
+
+    private func renewalStep(_ number: String, _ text: String) -> some View {
+        HStack(spacing: 10) {
+            Text(number)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Color(hex: "5BC265")))
+            Text(text)
+                .font(.system(size: 15))
+                .foregroundStyle(Color(hex: "1A1A1A"))
         }
     }
 }

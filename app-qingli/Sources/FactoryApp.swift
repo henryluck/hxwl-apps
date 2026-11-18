@@ -3,6 +3,7 @@ import Capabilities
 import CoreKit
 import Network
 import SwiftUI
+import UserNotifications
 
 // 集成适配包：按选配条件导入。没被 project.yml 引用的包 canImport 返回 false，
 // 对应 import 和分支整体不编译，SDK 不进二进制。clone 二次装配时只改 project.yml，
@@ -158,6 +159,10 @@ struct FactoryApp: App {
             bootstrapZhongtai(z)
             startHeartbeat(z)
         }
+
+        // 召回通知点按代理：静态实例钉住生命周期（delegate 是弱引用）。
+        // 注册后点按通知 → RetentionNotificationDelegate 切清理 Tab。
+        UNUserNotificationCenter.current().delegate = RetentionNotificationDelegate.shared
     }
 
     /// 启动链路：login → 数盟 → 归因 → $AppStart。login 失败挂网络恢复重试。
