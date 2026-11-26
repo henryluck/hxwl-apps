@@ -27,6 +27,8 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于展示当前位置、搜索附近地点、规划路线与实时导航</string>
+	<key>NSCameraUsageDescription</key>
+	<string>拍摄停车位置照片，仅保存在本机，不上传</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>保存素材到你的相册</string>
 	<key>NSPhotoLibraryUsageDescription</key>

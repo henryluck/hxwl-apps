@@ -2,6 +2,7 @@ import CoreLocation
 import CoreKit
 import PhotosUI
 import SwiftUI
+import UIKit
 
 // MARK: - 常用地点（规则 v0.31.1 §3：无类别、重复拦截、去导航走真实检索）
 
@@ -234,6 +235,9 @@ struct TravelToolsScreen: View {
     enum Route: Hashable { case parkingNote, addressParser }
     @State private var path: [Route] = []
     @State private var showSavedPlaces = false
+    /// 【就地删除】工具页记录卡的「删除便签」直接删除，不必进详情页
+    @State private var confirmDeleteParking = false
+    @State private var deleteFailed = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -290,6 +294,20 @@ struct TravelToolsScreen: View {
             }
             .sheet(isPresented: $showSavedPlaces) {
                 SavedPlacesScreen(model: model)
+            }
+            // 【就地删除】在工具页记录卡直接删除，二次确认后清除备注与照片
+            .alert("删除便签？", isPresented: $confirmDeleteParking) {
+                Button("删除", role: .destructive) {
+                    if !model.stores.deleteParking() { deleteFailed = true }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("删除后备注与照片将从本机清除，首页卡片同步消失，无法恢复。")
+            }
+            .alert("删除失败", isPresented: $deleteFailed) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text("记录未能删除，请重试。")
             }
         }
     }
@@ -407,7 +425,8 @@ struct TravelToolsScreen: View {
                 }
                 .buttonStyle(.plain)
                 Button {
-                    path.append(.parkingNote)
+                    // 【就地删除】直接弹确认删除，不必进详情页
+                    confirmDeleteParking = true
                 } label: {
                     Label("删除便签", systemImage: "trash")
                         .font(.system(size: 13, weight: .medium))
@@ -735,8 +754,12 @@ struct AddressParserView: View {
 struct ParkingNoteView: View {
     @ObservedObject var model: NavAppModel
     @State private var note = ""
+    /// 【修复】显式管理输入框焦点：提供「完成」键收起键盘，点空白也能收起
+    @FocusState private var noteFocused: Bool
     @State private var noteLimitHit = false
     @State private var imageItem: PhotosPickerItem?
+    /// 【拍照 bug】拍一张 = 真系统相机（UIImagePickerController .camera），与相册选择并存
+    @State private var showCamera = false
     @State private var draftImage: UIImage?
     @State private var processingImage = false     // 照片处理中（禁重复提交）
     @State private var imageError: String?         // 照片处理失败提示（草稿保留）
@@ -749,6 +772,8 @@ struct ParkingNoteView: View {
     @State private var homeVisible = true
     /// 记录刚被本次会话删除（用于隐藏编辑表单，回到空态）
     @State private var justDeleted = false
+    /// 【修复】回填只做一次；去掉 draftImage==nil 限制（先传图后备注也能正确回填）
+    @State private var didPrefill = false
 
     private var savedNote: NavStores.ParkingNote? { model.stores.parking }
     /// 可保存：非空备注或有效照片至少一项（双空不可点/不可覆盖旧记录）
@@ -770,9 +795,18 @@ struct ParkingNoteView: View {
         .background(NavTheme.bg)
         .navigationTitle("停车便签")
         .navigationBarTitleDisplayMode(.inline)
+        // 【修复】滚动/拖动时收起键盘；键盘工具栏也有「完成」按钮
+        .scrollDismissesKeyboard(.interactively)
         .onChange(of: imageItem) { item in
             guard let item else { return }
             processImage(item)
+        }
+        // 【拍照 bug 修复】系统相机全屏呈现：拍完回调 compress 同一套压缩管线
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraCaptureView(isPresented: $showCamera) { image in
+                processCapturedImage(image)
+            }
+            .ignoresSafeArea()
         }
         .alert("删除便签？", isPresented: $confirmDelete) {
             Button("删除", role: .destructive) {
@@ -799,10 +833,14 @@ struct ParkingNoteView: View {
         }
         .onAppear {
             // 【R-073-04·已有记录修改】回填当前备注/照片/展示开关（继承旧值，不自动重开）
-            if let saved = savedNote, note.isEmpty, draftImage == nil {
-                note = saved.note
-                homeVisible = saved.homeVisible
-                if let data = saved.imageData { draftImage = UIImage(data: data) }
+            // 【修复】① 只回填一次，避免视图重建把用户输入覆盖回旧值；
+            // ② 去掉 note.isEmpty / draftImage==nil 限制——先传图或先输入都不影响回填。
+            guard !didPrefill, let saved = savedNote else { return }
+            didPrefill = true
+            note = saved.note
+            homeVisible = saved.homeVisible
+            if let data = saved.imageData, draftImage == nil {
+                draftImage = UIImage(data: data)
             }
         }
     }
@@ -890,6 +928,16 @@ struct ParkingNoteView: View {
                 .background(NavTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(NavTheme.line, lineWidth: 1))
+                .focused($noteFocused)
+                // 【修复】键盘上加「完成」按钮，点它即可收起输入法
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("完成") { noteFocused = false }
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(NavTheme.accentDeep)
+                    }
+                }
                 .onChange(of: note) { value in
                     if value.count > 100 {
                         note = String(value.prefix(100))
@@ -902,21 +950,43 @@ struct ParkingNoteView: View {
                     .foregroundStyle(NavTheme.bad)
             }
 
-            // 拍一张（相机权限仅点击时请求）：走系统相机选择器，取消不改动草稿
-            PhotosPicker(selection: $imageItem, matching: .images) {
-                HStack(spacing: 8) {
-                    Image(systemName: processingImage ? "hourglass" : "photo.on.rectangle.angled")
-                    Text(processingImage ? "照片处理中…"
-                         : draftImage == nil ? "拍一张 / 选择停车照片"
-                         : "已选择照片，可重新选择")
-                        .font(.system(size: 14))
+            // 【拍照 bug 修复】两个独立入口：拍一张 = 真系统相机；相册选择保留为备选。
+            // 相机权限仅在点击「拍一张」时请求；取消不改动草稿。
+            HStack(spacing: 10) {
+                Button {
+                    showCamera = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "camera")
+                        Text("拍一张")
+                            .font(.system(size: 14))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(NavTheme.accentDeep, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
-                .foregroundStyle(NavTheme.accentDeep)
-                .frame(maxWidth: .infinity)
-                .frame(height: 46)
-                .background(NavTheme.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .disabled(processingImage)
+
+                PhotosPicker(selection: $imageItem, matching: .images) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                        Text("从相册选")
+                            .font(.system(size: 14))
+                    }
+                    .foregroundStyle(NavTheme.accentDeep)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(NavTheme.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .disabled(processingImage)
             }
-            .disabled(processingImage)
+            if processingImage {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.8)
+                    Text("照片处理中…").font(.system(size: 12)).foregroundStyle(NavTheme.inkMute)
+                }
+            }
 
             if let imageError {
                 Text(imageError)
@@ -986,6 +1056,24 @@ struct ParkingNoteView: View {
 
     // MARK: - 照片处理（规则 §2.1：验证 → 方向 → 等比压缩 → JPEG 0.78）
 
+    /// 相机拍摄回调：UIImage → JPEG Data → 复用 compress（与相册同一套规则）
+    private func processCapturedImage(_ image: UIImage) {
+        processingImage = true
+        imageError = nil
+        Task {
+            defer { processingImage = false }
+            guard let data = image.jpegData(compressionQuality: 1) else {
+                imageError = "照片处理失败，请重试。"
+                return
+            }
+            guard let processed = Self.compress(data) else {
+                imageError = "照片无法处理，请重试。"
+                return
+            }
+            draftImage = processed
+        }
+    }
+
     private func processImage(_ item: PhotosPickerItem) {
         processingImage = true
         imageError = nil
@@ -1050,6 +1138,54 @@ struct ParkingNoteView: View {
             // 保存后回填模式：不清 homeVisible（继承当前选择）
         } else {
             saveError = "保存失败（可能存储空间不足），草稿已保留，请重试。"
+        }
+    }
+}
+
+// MARK: - 系统相机封装（拍一张）
+
+/// UIImagePickerController(sourceType = .camera) 的 SwiftUI 包装。
+/// 仅全屏呈现、后置主摄、不可裁剪（压缩交给调用方统一管线）；取消则直接 dismiss 不改草稿。
+private struct CameraCaptureView: UIViewControllerRepresentable {
+    /// 【修复】必须由 SwiftUI 侧关闭 fullScreenCover（置 isPresented=false），
+    /// 只在 VC 层 dismiss 会留下 showCamera=true 的空白全屏层盖住页面——
+    /// 表现就是「传图后输入框点不到、键盘关不掉、文本输不进去」。
+    @Binding var isPresented: Bool
+    let onImage: (UIImage) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.cameraDevice = .rear
+        picker.allowsEditing = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onImage: onImage, finish: { isPresented = false })
+    }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onImage: (UIImage) -> Void
+        let finish: () -> Void
+        init(onImage: @escaping (UIImage) -> Void, finish: @escaping () -> Void) {
+            self.onImage = onImage
+            self.finish = finish
+        }
+
+        func imagePickerController(_ picker: UIImagePickerController,
+                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                onImage(image)
+            }
+            finish()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            finish()
         }
     }
 }
