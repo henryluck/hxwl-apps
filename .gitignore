@@ -37,3 +37,7 @@ keys/
 # 大体积媒体文件不入库（服务器直传）
 app/static/**/*.mp4
 app/static/**/*.webm
+
+# 本地归档包（423MB，含敏感配置）
+归档.zip
+*.zip
