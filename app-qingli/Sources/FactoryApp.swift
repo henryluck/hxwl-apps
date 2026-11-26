@@ -1,7 +1,9 @@
 import BaseComponents
 import Capabilities
 import CoreKit
+import Network
 import SwiftUI
+import UserNotifications
 
 // 集成适配包：按选配条件导入。没被 project.yml 引用的包 canImport 返回 false，
 // 对应 import 和分支整体不编译，SDK 不进二进制。clone 二次装配时只改 project.yml，
@@ -41,6 +43,8 @@ import CrashFirebase
 struct FactoryApp: App {
     private let spec: AppSpec
     private let capabilities: CapabilitySet
+    /// 数盟可信 ID 服务（文档 8.3：CDID 真实取号注入 adhead/上报）
+    private let digitalUnion: DigitalUnionService
     @StateObject private var pay: AnyPayService
     /// 启动序列是否在进行中（图 + 视频共用一个不透明容器，见 body）
     @State private var showSplashSequence: Bool
@@ -54,6 +58,10 @@ struct FactoryApp: App {
 
         let spec = AppSpec.load()
         self.spec = spec
+        // 数盟（数字联盟）可信 ID 服务（文档 8.3：CDID 真实取号；与 wxdh 同实现）
+        let digitalUnion = DigitalUnionService()
+        self.digitalUnion = digitalUnion
+        digitalUnion.prepareIfNeeded()
         // 中台（ios-server AES 代理）：先建，便于注入 IAP 验单与启动流程
         let zhongtaiClient: ZhongtaiClient? = {
             guard let zt = spec.integrations?.zhongtai,
@@ -62,7 +70,8 @@ struct FactoryApp: App {
                 config: ZhongtaiConfig(prdId: zt.prdId, baseURL: zt.baseURL,
                                        aesKey: zt.aesKey, aesIv: zt.aesIv, channel: zt.channel),
                 appVersion: spec.identity.version,
-                appVersionCode: spec.identity.build)
+                appVersionCode: spec.identity.build,
+                digitalUnionProvider: { [weak digitalUnion] in await digitalUnion?.cdid() })
         }()
         let zhongtai: any ZhongtaiService = zhongtaiClient ?? NullZhongtaiService()
 
@@ -148,15 +157,136 @@ struct FactoryApp: App {
             zhongtai: zhongtai
         )
 
-        // 中台：启动后台登录 → 归因 → $AppStart 事件（隐私协议随首次启动同意；失败静默）
+        // 中台启动链路（文档 361-617）：
+        // ① 登录（失败→网络恢复时重试）② 数盟 ID 上报（登录后，无数盟 SDK 静默跳过）
+        // ③ 归因（activityChannel 写请求头）④ $AppStart（实时，必报）
+        // ⑤ 心跳埋点（首次 5 分钟后，之后每 25 分钟；后台暂停计时）
+        // ⑥ 批量埋点队列（文档 8.6.2：20条/15s/启动/回前台触发，本地持久化不丢）
+        // 全部失败静默（文档允许：S2S 上报不阻断业务）。
         if let z = zhongtaiClient {
-            Task {
+            bootstrapZhongtai(z)
+            startHeartbeat(z)
+            TelemetryBatchQueue.shared.attach(z)
+        }
+
+        // 第三方归因 SDK（文档 8.4.2：巨量 BDASignalSDK / 广点通 GDTAction）。
+        // spec.integrations.attribution 配置驱动；未配置时全部静默跳过（运行时软依赖，
+        // SDK 库由装配侧按投放需求打入，App 源码不硬链接）。
+        if let attr = spec.integrations?.attribution {
+            AttributionSDK.setup(provider: attr.provider,
+                                 config: attr.config ?? [:],
+                                 launchOptions: nil)
+        }
+        // 归因接口附加字段注入（idfv / 广点通 zgxMap=CAID；含 ≤2s 就绪等待探针）
+        ZhongtaiClient.attributionExtrasProviderAsync = {
+            await AttributionSDK.waitForCAIDReady()
+            return AttributionSDK.attributionExtras()
+        }
+
+        // 召回通知点按代理：静态实例钉住生命周期（delegate 是弱引用）。
+        // 注册后点按通知 → RetentionNotificationDelegate 切清理 Tab。
+        UNUserNotificationCenter.current().delegate = RetentionNotificationDelegate.shared
+
+        // row51：ATT/通知权限弹窗与网络权限一样，首次启动后尽早逐个出现——
+        // App 构造完成即触发（内部一次性门控；稍等开机图渲染后再弹系统框）
+        PermissionPrimer.requestStartupPermissionsIfNeeded()
+    }
+
+    /// 启动链路（my-rules.md #60）：
+    /// **$AppStart 在链路最前端直发**（不等 login——补传队列只兜「尝试过但失败」，
+    /// 从未发出的事件是队列视野外的黑洞，首启「无线数据」弹窗挂起/弱网时整链夭折
+    /// = 该会话 $AppStart 跨启动也补不回）。
+    /// login 失败 → 真连通性探测驱动的恢复循环（NWPath 状态≠连通性，
+    /// 弹窗挂起期 path 恒 satisfied 会骗人；探测网真通才重试，窗口 5 分钟）。
+    private func bootstrapZhongtai(_ z: ZhongtaiClient) {
+        // ① 关键事件直发（失败走 TelemetryBatchQueue，15s 补传/下次启动 flush 必落地）
+        Task {
+            do {
+                try await z.reportEvent(name: "$AppStart",
+                                        params: ["$resume_from_background": false])
+            } catch {
+                TelemetryBatchQueue.shared.enqueue(name: "$AppStart", offset: 0,
+                                                   params: ["$resume_from_background": false])
+            }
+        }
+        // ② 登录链（login → 数盟 → 归因；失败进恢复循环）
+        Task {
+            do {
+                try await z.login()
+            } catch {
+                Log.error("[Zhongtai] 启动登录失败（真连通性探测驱动重试）: \(error.localizedDescription)")
+                await Self.retryLoginOnConfirmedNetwork(z)
+                return
+            }
+            await Self.postLoginFlow(z)
+        }
+    }
+
+    /// 登录成功后的固定序列：数盟 → 归因 → 用户属性（可重入；网络恢复重试也走这里）。
+    /// $AppStart 不在此列（已解耦直发，见 bootstrapZhongtai ①）。
+    private static func postLoginFlow(_ z: ZhongtaiClient) async {
+        try? await z.reportDigitalUnion()
+        try? await z.reportAttribution()
+        // 文档 8.6.3：登录成功后上报一次基础用户属性（幂等，可覆盖）
+        await z.reportUserProfileOnce()
+    }
+
+    /// 真连通性探测驱动的登录恢复（my-rules.md #60/#51 口径）：
+    /// 5 分钟窗口每 5s 真探测一次（probeInternetWhenReachable 耐心档语义：
+    /// 长生命周期 session + waitsForConnectivity——「无线数据」弹窗作答瞬间
+    /// 在途请求直接接住），网真通才执行登录链；链失败不自毁，下周期继续重试。
+    private static func retryLoginOnConfirmedNetwork(_ z: ZhongtaiClient) async {
+        let deadline = Date().addingTimeInterval(5 * 60)
+        let probeConfig = URLSessionConfiguration.ephemeral
+        probeConfig.timeoutIntervalForRequest = 10
+        probeConfig.waitsForConnectivity = true
+        let probeSession = URLSession(configuration: probeConfig)   // 长生命周期（#51）
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            // 真探测：能拿到 Apple captive-portal 200/204 才算网真通
+            var req = URLRequest(url: URL(string: "https://captive.apple.com/hotspot-detect.html")!)
+            req.httpMethod = "HEAD"
+            if let (_, resp) = try? await probeSession.data(for: req),
+               let http = resp as? HTTPURLResponse, http.statusCode == 200 {
                 do {
                     try await z.login()
-                    try? await z.reportAttribution()
-                    try? await z.reportEvent(name: "$AppStart", params: ["$os": "iOS"])
+                    await postLoginFlow(z)
+                    return
                 } catch {
-                    Log.error("[Zhongtai] 启动流程失败: \(error.localizedDescription)")
+                    // 链失败不自毁：窗口内下周期再试
+                    Log.error("[Zhongtai] 恢复重试登录仍失败: \(error.localizedDescription)")
+                }
+            }
+        }
+        Log.error("[Zhongtai] 5 分钟恢复窗口超时，放弃本会话重试")
+    }
+
+    /// 心跳埋点载体：钉住 monitor 生命周期（handler 闭包持有，方法级属性即可）。
+    private var netMonitor: NWPathMonitor?
+
+    /// 文档 8.6.2：sdk_heartbeat —— 启动 5 分钟后第一次，之后每 25 分钟一次；
+    /// 进后台暂停计时，回前台继续。
+    private func startHeartbeat(_ z: ZhongtaiClient) {
+        Task {
+            var elapsed: TimeInterval = 0
+            let tick: TimeInterval = 30          // 粒度 30s，后台不累计
+            let first: TimeInterval = 5 * 60
+            let interval: TimeInterval = 25 * 60
+            var firedOnce = false
+            while true {
+                try? await Task.sleep(nanoseconds: UInt64(tick * 1_000_000_000))
+                guard await UIApplication.shared.applicationState != .background else { continue }
+                elapsed += tick
+                let target = firedOnce ? interval : first
+                if elapsed >= target {
+                    elapsed = 0
+                    firedOnce = true
+                    do {
+                        try await z.reportEvent(name: "sdk_heartbeat", params: [:])
+                    } catch {
+                        // 文档 8.6.2⑤：实时失败 → 入批量队列重传
+                        TelemetryBatchQueue.shared.enqueue(name: "sdk_heartbeat", offset: 0, params: [:])
+                    }
                 }
             }
         }
@@ -204,6 +334,19 @@ struct FactoryApp: App {
                     finishSplashSequence()
                 }
             }
+            // 文档 8.6.2 批量上传触发③④：启动（此处 task 即启动）与回前台都触发 flush；
+            // 同时归因 SDK 的「隐私同意后允许上报」也挂在启动（本 App 引导完成即视为同意）。
+            .task {
+                TelemetryBatchQueue.shared.flushOnForeground()
+                AttributionSDK.startSendingEvents()
+            }
+            .onScenePhase(.active) {
+                TelemetryBatchQueue.shared.flushOnForeground()
+            }
+            // 文档 361-645 §2.6 / 361-815 §4.1：URL Scheme 唤起 → 采集 clickid + START_APP
+            .onOpenURL { url in
+                AttributionSDK.onOpenURL(url)
+            }
         }
     }
 
@@ -211,6 +354,26 @@ struct FactoryApp: App {
     private func finishSplashSequence() {
         withAnimation(.easeOut(duration: 0.4)) {
             showSplashSequence = false
+        }
+        // row47 修复：广播 splash 真实结束事件。
+        // 订阅墙的弹出时机原来靠盲等 2 秒（ShellRootView.tryTriggerPaywall），
+        // 但 splash 含开机视频时总时长 > 2s，视频还在播订阅页就盖上来——
+        // 用户看到「订阅页先出来，关闭后才看到启动页」。改事件驱动：splash
+        // 淡出动画启动时广播，订阅墙监听后再弹，顺序严格正确。
+        NotificationCenter.default.post(name: .splashSequenceDidFinish, object: nil)
+    }
+}
+
+/// splash 序列结束广播（row47）：ShellRootView 订阅墙等此事件后再弹
+extension Notification.Name {
+    static let splashSequenceDidFinish = Notification.Name("factoryapp.splashSequenceDidFinish")
+}
+
+/// scenePhase 的轻量封装（多处 .onChange(of: scenePhase) 样板收拢）。
+extension View {
+    func onScenePhase(_ phase: ScenePhase, action: @escaping () -> Void) -> some View {
+        onChange(of: phase) { (new: ScenePhase) in
+            if new == phase { action() }
         }
     }
 }

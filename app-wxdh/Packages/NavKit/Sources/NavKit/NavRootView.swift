@@ -44,6 +44,21 @@ public struct NavRootView: View {
             model.applyDebugLaunchScreenIfNeeded()
             #endif
         }
+        .onReceive(NotificationCenter.default.publisher(for: .permissionFlowDidFinish)) { _ in
+            // 宿主权限流程（ATT → 通知）走完且订阅页/挽留页已消失 → 此时才弹定位授权。
+            // 需求：定位权限等订阅页面完全消失之后再弹；已授权/已拒绝时 requestAuthorization
+            // 内部短路不弹，只有 notDetermined 才会弹系统窗。
+            model.location.requestAuthorization()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .presentPaywall)) { _ in
+            // 【Bug 行11】「我的」是本视图的 sheet，宿主的订阅页是 fullScreenCover：
+            // SwiftUI 里父视图的 fullScreenCover 在子视图已有活跃 sheet 时会被静默吞掉
+            // （一次呈现通道冲突），表现为点「开通会员」无响应。
+            // 修复：插件先收起自己的「我的」sheet，宿主订阅页下一帧即可正常弹出。
+            if model.showProfile {
+                model.showProfile = false
+            }
+        }
     }
 
     @ViewBuilder

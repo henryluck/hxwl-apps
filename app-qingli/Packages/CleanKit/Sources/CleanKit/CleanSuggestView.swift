@@ -3,20 +3,26 @@ import CoreKit
 import SwiftUI
 
 /// 智能清理建议页：总可释放空间 + 分类列表 + 一键清理。
+/// Bug表row49修复：summary 改为 @State + 监听 CleanCenter 变化。
+/// 详情页清理后触发 rescan()，rescan 完成更新 CleanCenter.shared.summary，
+/// 建议页通过 @ObservedObject center 收到通知并刷新本地 summary，
+/// "继续清理"回到建议页时看到的不再是旧的空列表。
 public struct CleanSuggestView: View {
-    let summary: ScanSummary
+    @State private var summary: ScanSummary
     let onOneTapClean: () -> Void
     let onOpenCategory: (CleanKind) -> Void
     /// 订阅门：未订阅点一键清理 → 弹订阅页（需求：核心功能拉订阅）
     var pay: (any PayService)? = nil
 
-    @State private var recheck = false
+    /// 监听全局 CleanCenter：详情页清理后 rescan 完成会更新它，
+    /// 建议页自动收到新 summary 刷新列表。
+    @ObservedObject private var center = CleanCenter.shared
 
     public init(summary: ScanSummary,
                 onOneTapClean: @escaping () -> Void,
                 onOpenCategory: @escaping (CleanKind) -> Void,
                 pay: (any PayService)? = nil) {
-        self.summary = summary
+        self._summary = State(initialValue: summary)
         self.onOneTapClean = onOneTapClean
         self.onOpenCategory = onOpenCategory
         self.pay = pay
@@ -64,6 +70,19 @@ public struct CleanSuggestView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(CleanPalette.navBarGreen, for: .navigationBar)
         .toolbarColorScheme(.light, for: .navigationBar)
+        // row49修复：详情页清理后 rescan 完成更新 CleanCenter，
+        // 建议页监听到变化即刷新本地 summary，"继续清理"回来看到的不再是无项目。
+        .onChange(of: center.summary) { newSummary in
+            if let newSummary, newSummary != summary {
+                summary = newSummary
+            }
+        }
+        .onAppear {
+            // 从详情页返回时也同步一次（防止 onChange 在页面不可见时错过了更新）
+            if let latest = center.summary, latest != summary {
+                summary = latest
+            }
+        }
     }
 
     private var totalCard: some View {

@@ -7,6 +7,10 @@ xcuserdata/
 .swiftpm/
 .build/
 
+# 高德 SDK 二进制（2.9G，超 GitHub 100M 单文件限制；另有 .framework/.xcframework 双份冗余）
+# 恢复方法：从高德开放平台重新下载，或见 README「SDK 放置」一节
+Vendor/
+
 # OS
 .DS_Store
 Thumbs.db

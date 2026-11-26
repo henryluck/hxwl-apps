@@ -97,9 +97,17 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
     /// 当前店面区域码（loadProducts 异步拉取 Storefront.current 后缓存；nil=未拉取，按非中国店面兜底显示配置价 ¥）
     private var storefrontCountryCode: String?
     private var updatesTask: Task<Void, Never>?
-    /// 服务端验单（可选）。注入后，购买成功会异步把票据发到服务端验单 + 上报支付状态；
-    /// 为「加法、非阻塞」：失败不影响本地放权（isPro 仍以 StoreKit 为准）。
+    /// 服务端验单+下单+埋点（可选）。注入后走文档 8.5 全链路：
+    /// 购买前服务端下单（orderId）→ 苹果支付 → 支付状态上报 → 验单（失败重试 3 次）
+    /// + app_purchase 七态埋点。全部为「加法、非阻塞」：失败不影响本地放权。
     private let iapVerifier: (any ZhongtaiService)?
+    /// commodityId（中台商品 id）↔ iosProductId（StoreKit 商品 id）映射。
+    /// 下单用 commodityId，购买用 iosProductId —— 中台商品列表返回后建立。
+    private var commodityByProductID: [String: String] = [:]
+    /// transactionId ↔ orderId 本地关联（文档 8.5.2/8.5.3：验单需要）。
+    private var orderIDByTransactionID: [String: String] = [:]
+    /// 当前购买会话的 orderId（purchase 前下单拿到，支付回调/验单时消费）。
+    private var pendingOrderID: String?
 
     public init(productID: String, retentionProductID: String? = nil,
                 iapVerifier: (any ZhongtaiService)? = nil) {
@@ -111,17 +119,34 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
             self.retentionProductID = nil
         }
         super.init()
+        // 中台商品列表：建立 commodityId ↔ iosProductId 映射（下单用；失败静默降级为无订单购买）
+        if let verifier = iapVerifier {
+            Task { [weak self] in
+                if let list = try? await verifier.iapProducts(type: .autoRenewable) {
+                    guard let self else { return }
+                    for item in list {
+                        if let cid = item.commodityId, let pid = item.iosProductId {
+                            self.commodityByProductID[pid] = cid
+                        }
+                    }
+                }
+            }
+        }
         updatesTask = Task { [weak self] in
             for await result in Transaction.updates {
                 guard let self else { continue }
                 if let transaction = try? Self.checkVerified(result) {
                     // 与 purchase 路径同策略：verified 即放权，finish/重查/上报随后。
-                    // 已撤销（退款/家庭共享收回）的交易不放权
+                    // 已撤销（退款/家庭共享收回）的交易不放权。
+                    // isPro 是 @Published：赋值必须在主线程（objectWillChange 在后台
+                    // 线程发射会让 SwiftUI 视图崩溃），Task {} 默认不继承 MainActor
                     if transaction.revocationDate == nil,
-                       self.entitlementIDs.contains(transaction.productID) { self.isPro = true }
+                       self.entitlementIDs.contains(transaction.productID) {
+                        await MainActor.run { self.isPro = true }
+                    }
                     await transaction.finish()
                     await self.refreshEntitlement()
-                    self.reportServerVerification(transaction)
+                    await self.reportServerVerification(transaction)
                 }
             }
         }
@@ -160,10 +185,14 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
         await refreshIntroEligibility()
     }
 
-    /// 首期优惠资格：StoreKit 按订阅组判定（组内任一订阅有历史购买即失去资格）。
+    /// 首期优惠资格三段式判定（my-rules.md #1）：
+    /// ① `hasSubscriptionHistory`（currentEntitlements/latest 命中，在订或已取消未到期）
+    ///    → 无资格（Apple：现有订阅者不享首期；兼挡沙盒误报 isEligible=true）；
+    /// ② 历史交易中**已领过**首期优惠（Transaction.all 里 offerType == .introductory）
+    ///    → 无资格——Apple 政策「从未领过才可享」，已领过又取消/过期的用户不可再享，
+    ///    而 isEligibleForIntroOffer 对该人群会误报 true（¥8 显示实扣 ¥48 的坑）；
+    /// ③ 其余（真新用户/沙盒重置资格）→ 以 Apple 实时 isEligibleForIntroOffer 为准。
     /// 需在商品加载后调用；商品未加载或主商品未配首期优惠时保持默认 true。
-    /// 本地订阅历史优先：有历史（含已到期）按「每组一次首期优惠」规则必然无资格，
-    /// 规避沙盒 isEligibleForIntroOffer 误报 true 导致老用户看到首期价。
     private func refreshIntroEligibility() async {
         // UI 测试/截屏钩子：-uitest-force-renewal 强制按复购态（无首期资格）展示，
         // 用于截取《复购订阅页面》原型对照，不影响真实用户逻辑
@@ -171,13 +200,41 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
             isIntroEligible = false
             return
         }
+        // ① 在订/未到期挡
         if hasSubscriptionHistory {
             isIntroEligible = false
             return
         }
+        // ② 历史已领过首期挡（Transaction.all 全量扫描，含已过期交易）；
+        //    首次调用前先做一次扫描（懒执行，开销大的全量扫描只跑一次）
+        if !introHistoryScanned {
+            await scanIntroOfferHistory()
+        }
+        if hasUsedIntroOffer {
+            isIntroEligible = false
+            return
+        }
+        // ③ 其余以 Apple 为准
         guard let sub = products[productID]?.subscription,
               sub.introductoryOffer != nil else { return }
         isIntroEligible = await sub.isEligibleForIntroOffer
+    }
+
+    private var hasUsedIntroOffer = false
+    private var introHistoryScanned = false
+
+    /// 扫描历史交易中是否领过首期优惠（规则 #1②）
+    private func scanIntroOfferHistory() async {
+        var used = false
+        for await result in Transaction.all {
+            if let transaction = try? Self.checkVerified(result),
+               transaction.offerType == .introductory {
+                used = true
+                break
+            }
+        }
+        hasUsedIntroOffer = used
+        introHistoryScanned = true
     }
 
     public func purchase() async throws {
@@ -205,10 +262,15 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
         }
         guard let product = products[productID] else {
             print("[Pay] ❌ purchase(productID:\(productID)) 商品不存在；已加载=\(products.keys.joined(separator: ",")) storefront=\(storefrontCountryCode ?? "nil")")
+            reportPurchaseEvent(state: 2, orderId: "", transactionId: "", sandbox: false, msg: "product not found: \(productID)")
             throw PayError.productNotFound
         }
+        // 文档 8.5.2：用户发起购买前先服务端下单（拿 orderId；失败降级为无订单购买，不阻断）
+        let orderId = await createServerOrder(productID: productID)
+        pendingOrderID = orderId
         let result: Product.PurchaseResult
         do {
+            reportPurchaseEvent(state: 3, orderId: orderId ?? "", transactionId: "", sandbox: Self.isSandboxEnv, msg: "")
             result = try await product.purchase()
         } catch {
             // 沙盒/审核环境常见 StoreKitError.unknown("Unable to Complete Request") 等
@@ -216,6 +278,8 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
             // 支付确认框以外的副作用）。非瞬时错误（用户取消不走到这/商品问题）直接抛。
             guard error.isTransientPurchaseFailure else {
                 print("[Pay] ❌ purchase failed (non-retryable): \(error)")
+                reportPurchaseEvent(state: 5, orderId: orderId ?? "", transactionId: "", sandbox: Self.isSandboxEnv, msg: error.localizedDescription)
+                reportPayState(.failure, orderId: orderId, tranId: nil)
                 throw error
             }
             print("[Pay] ⚠️ purchase transient failure, auto-retry once: \(error)")
@@ -228,10 +292,16 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
             // finish()/权益重查/服务端验单挪后台，失败自愈（finish 未完成会在下次
             // 启动经 Transaction.updates 重投，由监听补 finish）
             if entitlementIDs.contains(transaction.productID) { isPro = true }
+            let txid = String(transaction.id)
+            // 文档 8.5.3：本地保存 transactionId↔orderId 关系（验单用）
+            if let oid = orderId { orderIDByTransactionID[txid] = oid }
+            reportPurchaseEvent(state: 4, orderId: orderId ?? "", transactionId: txid,
+                                sandbox: transaction.environment == .sandbox, msg: "")
+            reportPayState(.success, orderId: orderId, tranId: txid)
             Task { [weak self] in
                 await transaction.finish()
                 await self?.refreshEntitlement()
-                self?.reportServerVerification(transaction)
+                await self?.reportServerVerification(transaction)
             }
         }
         // .userCancelled / .pending 是 PurchaseResult 的非 success 分支，静默不抛；
@@ -241,6 +311,23 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
     public func restore() async {
         try? await AppStore.sync()
         await refreshEntitlement()
+        // 文档 8.5.6：恢复购买上报 —— 列出有交易 id 的历史交易（orderInfoList）。
+        // AppStore.sync 后 currentEntitlements 已刷新；恢复成功与否由权益变化体现。
+        if let verifier = iapVerifier {
+            var orderInfoList: [[String: Any]] = []
+            for id in entitlementIDs {
+                if let latest = await Transaction.latest(for: id),
+                   let verified = try? Self.checkVerified(latest) {
+                    orderInfoList.append([
+                        "transactionId": String(verified.id),
+                        "originTransactionId": String(verified.originalID),
+                    ])
+                }
+            }
+            if !orderInfoList.isEmpty {
+                try? await verifier.iapRestore(orderInfoList: orderInfoList)
+            }
+        }
     }
 
     public func refreshEntitlement() async {
@@ -274,23 +361,148 @@ public final class StoreKitPayService: NSObject, ObservableObject, PayService {
         return ids
     }
 
-    // MARK: - 服务端验单（加法、非阻塞）
-    /// 购买/恢复成功后异步上报：票据验单 + 支付状态。失败静默，绝不影响 isPro。
-    private func reportServerVerification(_ transaction: Transaction) {
-        guard let verifier = iapVerifier, let receipt = Self.appReceiptBase64() else { return }
-        let txid = String(transaction.id)
-        Task {
-            try? await verifier.iapVerify(
-                receiptData: receipt,
-                transactionId: txid,
-                orderId: nil,
-                isSandbox: transaction.environment == .sandbox
-            )
-            try? await verifier.iapReportPayState(state: .success, orderId: nil, tranId: txid)
+    // MARK: - 服务端链路（加法、非阻塞）
+
+    /// 文档 8.5.2：服务端下单。iosProductId → commodityId 映射缺失（中台商品列表
+    /// 未拉到/未配置该商品）时返回 nil，购买继续走无订单模式（状态上报会报订单不存在，
+    /// 属中台侧配置问题，不阻断用户支付）。
+    private func createServerOrder(productID: String) async -> String? {
+        guard let verifier = iapVerifier else { return nil }
+        // 映射未建立时补拉一次商品列表
+        if commodityByProductID.isEmpty {
+            if let list = try? await verifier.iapProducts(type: .autoRenewable) {
+                for item in list {
+                    if let cid = item.commodityId, let pid = item.iosProductId {
+                        commodityByProductID[pid] = cid
+                    }
+                }
+            }
+        }
+        guard let commodityId = commodityByProductID[productID] else {
+            print("[Pay] ⚠️ 中台无 \(productID) 的商品映射，跳过服务端下单")
+            return nil
+        }
+        do {
+            let orderId = try await verifier.iapCreateOrder(commodityId: commodityId, userId: verifier.userId)
+            if let orderId {
+                reportPurchaseEvent(state: 1, orderId: orderId, transactionId: "", sandbox: Self.isSandboxEnv, msg: "")
+            }
+            return orderId
+        } catch {
+            // 下单失败埋点（状态 2 由 reportPurchaseEvent 统一口径：下单失败）
+            reportPurchaseEvent(state: 2, orderId: "", transactionId: "", sandbox: Self.isSandboxEnv,
+                                msg: "create order failed: \(error.localizedDescription)")
+            print("[Pay] ⚠️ 服务端下单失败（继续无订单购买）: \(error)")
+            return nil
         }
     }
 
-    /// 读取 App Store 票据并 base64（匹配 ios-server /api/iap/verify 的 receiptData 契约）。
+    /// 购买/恢复成功后异步上报：票据验单（失败重试 3 次，文档 8.5.4）+ 支付状态。
+    /// 失败静默，绝不影响 isPro。
+    private func reportServerVerification(_ transaction: Transaction) async {
+        // 【server 日志 8.5.4 排查】0 次 store/verify 的门控点全部留痕：
+        // ①iapVerifier 未注入 ②receipt 读不到（SK2 沙盒新装首笔 receipt 可能延迟生成）
+        guard let verifier = iapVerifier else {
+            Log.warn("[验单] 跳过：iapVerifier 未注入（中台未配置）")
+            return
+        }
+        // SK2 沙盒新装环境首笔交易后 receipt 文件可能延迟生成——直接读会 nil →
+        // 静默 return → server 侧 0 次 store/verify（wxdh 曾踩过同坑）。
+        // 修：有界等待重试读 receipt（3 次 × 2s），仍空则留痕放弃。
+        var receipt: String?
+        for attempt in 1...3 {
+            if let r = Self.appReceiptBase64(), !r.isEmpty {
+                receipt = r
+                break
+            }
+            Log.info("[验单] receipt 未就绪（第 \(attempt)/3 次），2s 后重读")
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+        guard let receipt else {
+            Log.warn("[验单] receipt 持续为空，放弃验单 txid=\(transaction.id)（下次启动补单链会重投）")
+            return
+        }
+        let txid = String(transaction.id)
+        let orderId = orderIDByTransactionID[txid] ?? pendingOrderID
+        // 文档 8.5.4：验单带商品金额/币种/推介优惠（首购优惠价 promotionAmount）。
+        // StoreKit2 的 Transaction.offer 只有 id/type/paymentMode，无价格——
+        // 推介优惠价从 Product.subscription.introductoryOffer.price 取（即 SK1 的
+        // introductoryPrice 等价物）；金额 Product.price（Decimal）；币种用店面
+        // countryCode（服务端按店面解析）。
+        let product = products[transaction.productID]
+        let hasOffer: Bool
+        if #available(iOS 17.2, *) {
+            hasOffer = transaction.offer != nil
+        } else {
+            hasOffer = transaction.offerType != nil
+        }
+        let promoAmount: Decimal? = (hasOffer ? product?.subscription?.introductoryOffer?.price : nil)
+        Task {
+            var retry = 0
+            while retry <= 3 {
+                do {
+                    try await verifier.iapVerify(
+                        receiptData: receipt,
+                        transactionId: txid,
+                        orderId: orderId,
+                        isSandbox: transaction.environment == .sandbox,
+                        amount: product?.price,
+                        currency: storefrontCountryCode,
+                        promotionAmount: promoAmount
+                    )
+                    reportPurchaseEvent(state: 6, orderId: orderId ?? "", transactionId: txid,
+                                        sandbox: transaction.environment == .sandbox, msg: "")
+                    return
+                } catch {
+                    retry += 1
+                    if retry > 3 {
+                        reportPurchaseEvent(state: 7, orderId: orderId ?? "", transactionId: txid,
+                                            sandbox: transaction.environment == .sandbox,
+                                            msg: error.localizedDescription)
+                        return
+                    }
+                    // 文档：失败 5s 后重试
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                }
+            }
+        }
+    }
+
+    /// 文档 8.5.3：上报苹果购买状态（PAY_SUCCESS / PAY_FAILURE；platform=apple 服务端补）。
+    private func reportPayState(_ state: TianxuPayState, orderId: String?, tranId: String?) {
+        guard let verifier = iapVerifier else { return }
+        Task { try? await verifier.iapReportPayState(state: state, orderId: orderId, tranId: tranId) }
+    }
+
+    /// 文档 8.5.7：app_purchase 七态埋点
+    ///（1下单成功 2下单失败 3支付中 4支付成功 5支付失败 6验证成功 7验证失败）。
+    /// 实时上报失败 → 入批量队列重传（文档 8.6.2⑤）。
+    private func reportPurchaseEvent(state: Int, orderId: String, transactionId: String,
+                                     sandbox: Bool, msg: String) {
+        guard let verifier = iapVerifier else { return }
+        let params: [String: Any] = [
+            "state": state,
+            "orderId": orderId,
+            "transactionIdentifier": transactionId,
+            "sandbox": sandbox,
+            "msg": msg,
+        ]
+        Task {
+            do {
+                try await verifier.reportEvent(name: "app_purchase", params: params)
+            } catch {
+                TelemetryBatchQueue.shared.enqueue(name: "app_purchase", offset: 0, params: params)
+            }
+        }
+    }
+
+    /// 票据 URL 是否沙盒环境（StoreKit 1 receipt 路径含 sandbox）。
+    private static var isSandboxEnv: Bool {
+        Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+            || Bundle.main.appStoreReceiptURL?.path.contains("sandboxReceipt") == true
+    }
+
+    /// 读取 App Store 票据并 base64（匹配 ios-server /api/v1/store/verify 的 receiptData 契约）。
     private static func appReceiptBase64() -> String? {
         guard let url = Bundle.main.appStoreReceiptURL,
               let data = try? Data(contentsOf: url) else { return nil }

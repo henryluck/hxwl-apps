@@ -10,6 +10,10 @@ packages:
     path: Packages/BaseComponents
   NavKit:
     path: Packages/NavKit
+  # 数盟（数字联盟）可信 ID SDK 3.8.3（文档 361-617 §8.3）：CDID/IDFA 补位/风控标签。
+  # 薄封装 target（DigitalUnionSDK）重导出二进制模块 du（IDE 兼容，见包内注释）。
+  DigitalUnion:
+    path: Packages/Integrations/DigitalUnion
 targets:
   FactoryCore:
     type: application
@@ -26,27 +30,58 @@ targets:
       - path: Resources/assets
         type: folder
       - path: Resources/Assets.xcassets
+      # 高德 SDK 资源包（静态 xcframework 的 bundle 不会自动拷入 App，需显式加入 resources；
+      # 否则 NSBundle(url: nil) 启动崩溃。MAMapKit 与 AMapNaviKit 各带一个同名 AMap.bundle
+      # （内容几乎一致，NaviKit 版多 offline 目录）→ 取 NaviKit 版拷贝到 Vendor/AMap/Resources
+      # 作为唯一源，避免 Multiple commands produce 冲突）
+      - path: Vendor/AMap/Resources/AMap.bundle
+      - path: Vendor/AMap/Resources/AMapNavi.bundle
     dependencies:
       - package: CoreKit
       - package: Capabilities
       - package: BaseComponents
       - package: NavKit
+      - package: DigitalUnion
+        product: DigitalUnionSDK
+      # 高德 iOS SDK（静态 xcframework：ios-arm64 设备切片 + arm64/x86_64 模拟器切片）
+      # 【vmap 崩溃修复】AMapNaviKit 内嵌完整 3D 地图（含 MAMapView 全部符号）——
+      # MAMapKit 与 AMapNaviKit 各自携带 vmap 纹理管理器，同时链接两份归档时
+      # C++ 全局构造双重执行 → GlobalCustomTextureObserver 野指针崩溃。
+      # 因此不再链接 MAMapKit.xcframework（MAMapView/MAMapViewDelegate 符号由
+      # AMapNaviKit 提供；MAMapKit.framework 仅作为头文件源保留在 Vendor 供 import）。
+      - framework: Vendor/AMap/AMapFoundationKit.xcframework
+        embed: false
+      - framework: Vendor/AMap/AMapNaviKit.xcframework
+        embed: false
+      - framework: Vendor/AMap/AMapSearchKit.xcframework
+        embed: false
+      # 广点通转化 SDK（GDTAction 2.1.4 静态库：设备+模拟器 arm64 切片；
+      # module.modulemap 在 Vendor/GDT 供 import GDTAction）——静态库经
+      # OTHER_LDFLAGS 链接（xcodegen 不支持裸 .a 依赖）
+      # （链接 flag 见 settings 块 OTHER_LDFLAGS）
     info:
       path: FactoryCore-Info.plist
       properties:
         CFBundleDisplayName: "智能卫星定位"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        UILaunchScreen: {}
+        # 启动屏底色取开机图 splash.png 顶部主色（深青 #184853）：
+        # 空 {} 时系统启动屏是纯白，会在开机图出现前闪一下白。
+        UILaunchScreen:
+            UIColorName: launchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSPhotoLibraryAddUsageDescription: 保存素材到你的相册
         NSPhotoLibraryUsageDescription: 选择停车照片，仅保存在本机
         NSLocationWhenInUseUsageDescription: 用于展示当前位置、搜索附近地点、规划路线与实时导航
+        NSUserTrackingUsageDescription: 你的数据将用于提升广告相关性与个性化体验，是否允许跨 App 追踪
         UIBackgroundModes:
           - location
           - audio
         NSSupportsLiveActivities: true
+        # 高德 SDK 部分接口走 HTTP（官方入门指南要求 ATS 放行），否则 SDK 静默失败
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     settings:
       base:
         SWIFT_OPTIMIZATION_LEVEL: '-Osize'
@@ -55,6 +90,26 @@ targets:
         PRODUCT_NAME: "智能卫星定位"
         TARGETED_DEVICE_FAMILY: 1
         SWIFT_VERSION: "5.9"
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0.2"
+        CURRENT_PROJECT_VERSION: "3"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # 广点通转化 SDK：GDT 2.1.4 fat 库 arm64 切片是设备专用（legacy 平台标记，
+        # 新链接器在 arm64 模拟器上拒链）→ **仅真机构建**启用 SDK（module import +
+        # 静态库链接）；模拟器构建 canImport(GDTAction)=false，GDTConversionService
+        # 全部方法安全空转，UI 链路照常冒烟。上报验证需真机/TestFlight。
+        # 【崩溃修复 2026-11-25】-ObjC 必须：SDK 内部靠 category 注入方法
+        # （如 NSMutableDictionary(GDTActionSafe) gdtAction_safeSetObject:forKey:），
+        # 无 -ObjC 时 category 不加载 → loadDefaultData 链 unrecognized selector 崩溃
+        # （ASC 崩溃栈：GDTAction.start → SettingMgr loadDefaultData → __forwarding__）
+        SWIFT_INCLUDE_PATHS[sdk=iphoneos*]: "$(SRCROOT)/Vendor/GDT"
+        # 数盟 SDK 链接：官方说明书 §1.2 要求 libresolv（SPM binaryTarget 挂不了
+        # linkerSettings，由宿主侧承担——参考工程 qnqlds-app 同款做法）；-ObjC 同理
+        # 加载 SDK 的 category 方法
+        OTHER_LDFLAGS[sdk=iphoneos*]: "-ObjC -lresolv $(SRCROOT)/Vendor/GDT/libGDTActionSDK.a"
+      configs:
+        Debug:
+          # #if DEBUG 调试入口（PAY_DEBUG_* / NAV_DEBUG_* / ONBOARDING_DEBUG_*）依赖此条件；
+          # 缺失时所有 #if DEBUG 代码被裁掉，SIMCTL_CHILD 环境变量入口静默失效（README 有教训记录）
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+          ONLY_ACTIVE_ARCH: 'YES'
+          ENABLE_TESTABILITY: 'YES'

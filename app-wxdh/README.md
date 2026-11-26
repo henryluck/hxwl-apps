@@ -34,6 +34,24 @@ python3 factory.py build-source --source .
 
 会员门槛：`NavAppModel.requireMembership()` → `.presentPaywall` 通知 → 宿主 `ShellRootView` 弹订阅页；法务文档走 `.presentLegalDoc`。
 
+## 权限时序（网络 / 通知 / ATT / 定位）
+
+导航类 App 需要的四项权限按以下时序获取，代码入口 `Packages/Capabilities/Sources/Capabilities/PermissionService.swift`：
+
+| 权限 | 弹窗时机 | 实现说明 |
+|---|---|---|
+| 网络 | 无弹窗 | iOS 无「网络权限」API；国内设备联网弹窗由系统在首次网络请求时自动触发，蜂窝数据开关在系统设置 |
+| ATT（跨 App 追踪） | 订阅页/挽留页完全消失后 | `ATTrackingManager.requestTrackingAuthorization`，Info.plist 已配 `NSUserTrackingUsageDescription`；归因上报 `phoneId` 仍传空（工厂未接归因 SDK，读 IDFA 需后续接入） |
+| 通知 | ATT 之后立刻（串行） | `UNUserNotificationCenter.requestAuthorization([.alert, .sound, .badge])`；系统一次只显示一个权限弹窗，`PermissionFlowController` 内部 await 排队保证不叠弹 |
+| 定位 | 权限流程（ATT+通知）走完、订阅页面彻底消失后 | 宿主发 `.permissionFlowDidFinish` 通知 → `NavKit/NavRootView` 监听 → `LocationService.requestAuthorization()`（`requestWhenInUseAuthorization`） |
+
+关键约束：
+
+- **订阅页期间绝不弹权限**：权限弹窗与订阅墙同屏会打断转化链路。`ShellRootView.tryTriggerPermissionFlow()` 门控 `showPaywall || showRetention`，只有订阅链路彻底结束（订阅页关闭且无挽留页 / 挽留页关闭 / 引导末页订阅页关闭）才执行。
+- **只弹一次**：`PermissionFlowController` 用 UserDefaults 标记 `hasCompleted`，后续冷启动静默跳过（已拒绝的用户不会被打扰；功能触发时 `LocationService` 仍会按需引导去设置页）。
+- **非 notDetermined 短路**：所有请求 API 内部先读当前状态，已授权/已拒绝直接返回，不重复弹窗。
+
+
 ## 会员商品
 
 订阅页按需求「订阅四场景」实现：**场景 = 变体 × 首期资格**（`PaywallVariant` + `PayStore.introOfferState`），同一份配置渲染四种页面。
@@ -66,7 +84,7 @@ python3 factory.py build-source --source .
 - 未解锁页面（罗盘/海拔）连续停留 10 秒自动提醒一次，订阅页关闭后重新计时
 - ASC 后台需同时创建上述两个商品并随版本提交，否则沙盒下点购买会提示「商品信息未加载」
 
-调试入口：启动环境变量 `SIMCTL_CHILD_NAV_DEBUG_SCREEN=<home|nearby|plan|navigating|compass|altitude|weather>`、`SIMCTL_CHILD_NAV_DEBUG_UNLOCK=1`（仅 DEBUG 生效）。
+调试入口：启动环境变量 `SIMCTL_CHILD_NAV_DEBUG_SCREEN=<home|nearby|plan|navigating|compass|altitude|weather>`、`SIMCTL_CHILD_NAV_DEBUG_NEARBY_CATEGORY=<charger|fishingSpot|tackleShop|hospital|gym|park>`（nearby 落点分类，验证分类条自动滚动用 gym/park）、`SIMCTL_CHILD_NAV_DEBUG_UNLOCK=1`、`SIMCTL_CHILD_COMPASS_DEBUG_HELP=1`（罗盘使用说明弹窗直接展开，截图用）、`SIMCTL_CHILD_PAY_DEBUG_NO_WALL=1`（抑制冷启动订阅墙，功能页截图用）（仅 DEBUG 生效）。
 订阅页调试：`SIMCTL_CHILD_PAY_DEBUG_OPEN=1` 直接拉起订阅页；`SIMCTL_CHILD_PAY_DEBUG_VARIANT=startup|unlock` 指定变体（默认 unlock）；`SIMCTL_CHILD_PAY_DEBUG_ELIGIBILITY=available|unavailable|unknown` 固定首期资格（四场景截图用）；`SIMCTL_CHILD_ONBOARDING_DEBUG_PAGE=3` 直接落到引导第 4 页；`SIMCTL_CHILD_ONBOARDING_DEBUG_DONE=1` 模拟引导已完成的老用户（验证冷启动订阅墙）。
 冷启动订阅墙：未订阅用户每次冷启动，开机图/视频播完、功能页面显示时自动拉起订阅页（解锁场景）；引导流程显示中不弹（引导末尾自带订阅页）；开机序列结束通知 `.splashSequenceDidFinish` 由 FactoryApp 发出、ShellRootView 监听（权益查询与开机序列双就绪门控）。
 

@@ -40,9 +40,30 @@ public struct StorageAnalysisView: View {
         .toolbarBackground(CleanPalette.navBarGreen, for: .navigationBar)
         .toolbarColorScheme(.light, for: .navigationBar)
         .task { await computeCategories() }
+        // row56：回前台刷新——后台期间相册变更/照片库服务重启会让已算数据失效
+        // （分类占比变 0、图片加载不出），回前台重算 + 刷新存储信息
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification)) { _ in
+            storage = DeviceStorage.current()
+            Task { await computeCategories() }
+        }
+        // row59：未授权提示弹窗（去设置/取消，与首页/压缩页同款文案）
+        .alert("需要访问照片权限", isPresented: $showAuthAlert) {
+            Button("去设置") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("请允许访问照片库，以便扫描可清理的照片和视频。")
+        }
     }
 
     // MARK: - 状态卡
+
+    // row59：未授权相册时点「开始清理」→ 提示授权，不再进入清理建议页显示「无可清理」
+    @State private var showAuthAlert = false
 
     private var statusCard: some View {
         CleanCard {
@@ -52,7 +73,14 @@ public struct StorageAnalysisView: View {
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(levelColor)
                     Spacer()
-                    Button(action: onClean) {
+                    Button {
+                        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+                        if status == .authorized || status == .limited {
+                            onClean()
+                        } else {
+                            showAuthAlert = true
+                        }
+                    } label: {
                         Text("开始清理")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white)
@@ -223,6 +251,26 @@ public struct StorageAnalysisView: View {
             }
             return CategoryUsage(photoBytes: photo, videoBytes: video)
         }.value
+        // row56：后台久回前台 photosd 恢复窗口期 fetch 可能瞬时为空（photo+video 全 0
+        // 而磁盘明显在用）→ 延迟 1s 重算一次，避免占比错误归零
+        if result.photoBytes == 0, result.videoBytes == 0 {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            let retry = await Task.detached(priority: .utility) { () -> CategoryUsage in
+                var photo: Int64 = 0
+                var video: Int64 = 0
+                let opts = PHFetchOptions()
+                opts.fetchLimit = 5000
+                let fetch = PHAsset.fetchAssets(with: opts)
+                fetch.enumerateObjects { asset, _, _ in
+                    let size = CleanScanner.fileSize(of: asset)
+                    if asset.mediaType == .image { photo += size }
+                    if asset.mediaType == .video { video += size }
+                }
+                return CategoryUsage(photoBytes: photo, videoBytes: video)
+            }.value
+            analysis = retry
+            return
+        }
         analysis = result
     }
 }

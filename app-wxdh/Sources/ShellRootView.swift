@@ -1,11 +1,21 @@
 import BaseComponents
 import Capabilities
+import CoreKit
 import SwiftUI
 
 /// 壳根视图：按说明书装配 Tab（M1：占位首页 + 我的；M2 起插件页面挂载进来）
 struct ShellRootView: View {
     let spec: AppSpec
     let capabilities: CapabilitySet
+    /// 广点通转化 SDK（与中台/支付共享同一实例）：隐私同意语义下初始化
+    /// （老用户已同意 → 主界面出现即启；新用户走完引导由 onChange 启动）。幂等安全。
+    private let gdtConversion: GDTConversionService
+
+    init(spec: AppSpec, capabilities: CapabilitySet, gdtConversion: GDTConversionService) {
+        self.spec = spec
+        self.capabilities = capabilities
+        self.gdtConversion = gdtConversion
+    }
 
     @AppStorage("hasSeenWelcomePaywall") private var seenPaywall = false
     @AppStorage("hasFinishedOnboarding") private var finishedOnboarding = false
@@ -16,6 +26,8 @@ struct ShellRootView: View {
     /// 订阅页场景变体：功能拦截 / 我的-会员卡 → 解锁场景（场景 02/04，周+终身双框）；
     /// 引导末页由 OnboardingFlow 自带启动场景（场景 01/03，只有价格行）
     @State private var paywallVariant: PaywallVariant = .unlock
+    /// 调用方指定的默认选中方案（nil=按 spec defaultPlan；会员入口传 .lifetime）
+    @State private var paywallPreferredPlan: PaywallPlan?
     @State private var showRetention = false       // 挽留诱导页（订阅页关闭后弹）
     @State private var didTriggerPaywall = false   // 防重入：本次启动只触发一次订阅页
     @State private var entitlementReady = false    // isPro 查询完成（启动时等 StoreKit）
@@ -78,6 +90,11 @@ struct ShellRootView: View {
                 if ProcessInfo.processInfo.environment["PAY_DEBUG_VARIANT"] == "startup" {
                     paywallVariant = .startup
                 }
+                // PAY_DEBUG_MEMBER_ENTRY=1 走「会员入口」路径：终身默认选中
+                //（验证页头会员按钮行为；配合 PAY_DEBUG_UNLOCKED=1 验已订阅形态）
+                if ProcessInfo.processInfo.environment["PAY_DEBUG_MEMBER_ENTRY"] == "1" {
+                    paywallPreferredPlan = .lifetime
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showPaywall = true }
             }
             #endif
@@ -102,10 +119,15 @@ struct ShellRootView: View {
                 seenPaywall = false
                 didTriggerPaywall = false
             }
+            // 广点通转化 SDK：老用户（已同意、无需再走引导）→ 主界面出现即初始化
+            if !needsOnboarding { gdtConversion.startIfNeeded() }
         }
         .onChange(of: finishedOnboarding) { done in
             // 引导页走完（含末尾订阅页被关闭）→ 检查 isPro + retention 决定是否弹挽留页（已购挽留不再弹）
             if done {
+                // 【防二弹】引导末页自带订阅页（startup 场景），本次启动已展示过订阅内容：
+                // 冷启动订阅墙（unlock 场景）不得再弹，didTriggerPaywall 一并置位锁死。
+                didTriggerPaywall = true
                 if capabilities.pay.isPro {
                     seenPaywall = true
                 } else if shouldOfferRetention {
@@ -121,11 +143,22 @@ struct ShellRootView: View {
                 selectedTab = target
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .presentPaywall)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .presentPaywall)) { note in
             // 插件内会员拦截统一弹宿主订阅页（价格/商品只在此处）
-            // 拦截场景一律走解锁场景（场景 02/04：四卖点 + 周/终身双框，默认周）
+            // 拦截场景一律走解锁场景（场景 02/04：四卖点 + 周/终身双框，默认周）。
+            // 【会员入口】页头「会员」按钮带 preferredPlan=lifetime：未订阅 → 终身默认选中；
+            // 已订阅 → PaywallView 自动呈现「会员权益已生效」卡（同一页面两种形态）。
+            // 【Bug 行22】日志定位"会员按钮无响应"：确认宿主是否收到通知、走了哪个分支
+            let fromMemberEntry = (note.userInfo?["source"] as? String) == "memberEntry"
+            Log.warn("[Paywall] 收到 presentPaywall 通知 memberEntry=\(fromMemberEntry) isPro=\(capabilities.pay.isPro)")
             if !capabilities.pay.isPro {
                 paywallVariant = .unlock
+                paywallPreferredPlan = fromMemberEntry ? .lifetime : nil
+                DispatchQueue.main.async { showPaywall = true }
+            } else if fromMemberEntry {
+                // 已订阅点「会员」：打开已订阅页面（会员权益已生效卡）
+                paywallVariant = .unlock
+                paywallPreferredPlan = nil
                 DispatchQueue.main.async { showPaywall = true }
             }
         }
@@ -133,6 +166,7 @@ struct ShellRootView: View {
             // 开机图/视频播完、功能页面开始显示 → 此时才拉起启动订阅页（splash 期间不弹）
             splashSequenceDone = true
             tryTriggerPaywall()
+            tryTriggerPermissionFlow()
         }
         .onReceive(NotificationCenter.default.publisher(for: .presentLegalDoc)) { note in
             if let doc = note.userInfo?["doc"] as? String {
@@ -148,7 +182,8 @@ struct ShellRootView: View {
                         variant: paywallVariant,
                         theme: capabilities.theme,
                         pay: capabilities.pay,
-                        analytics: capabilities.analytics)
+                        analytics: capabilities.analytics,
+                        preferredPlan: paywallPreferredPlan)
         }
         .onChange(of: showPaywall) { shown in
             // 订阅页关闭：已订阅直接进主界面；否则按 retention 配置决定是否弹诱导页（已购挽留不再弹）
@@ -157,15 +192,28 @@ struct ShellRootView: View {
                 NotificationCenter.default.post(name: .paywallDidDismiss, object: nil)
                 if capabilities.pay.isPro {
                     seenPaywall = true
+                    tryTriggerPermissionFlow()   // 订阅页消失 → 走 ATT/通知/定位权限流程
                 } else if shouldOfferRetention {
                     DispatchQueue.main.async { showRetention = true }
                 } else {
                     seenPaywall = true
+                    tryTriggerPermissionFlow()   // 订阅页消失 → 走 ATT/通知/定位权限流程
                 }
             }
         }
         .onChange(of: showRetention) { shown in
-            if !shown { seenPaywall = true }
+            if !shown {
+                seenPaywall = true
+                // 挽留页也消失了（订阅链路彻底结束）→ 此时才弹 ATT/通知，NavKit 请求定位
+                tryTriggerPermissionFlow()
+            }
+        }
+        .onChange(of: finishedOnboarding) { done in
+            // 引导末页订阅页关闭时 OnboardingFlow 才回调 onFinish（finishedOnboarding=true），
+            // 与下方「引导页走完」分支同一时机：订阅链路结束 → 权限流程
+            if done { tryTriggerPermissionFlow() }
+            // 广点通转化 SDK：新用户走完引导（隐私同意完成）→ 初始化 + 启动上报
+            if done { gdtConversion.startIfNeeded() }
         }
     }
 
@@ -262,12 +310,42 @@ struct ShellRootView: View {
     /// 引导未走完时不触发——引导末尾自带订阅页，避免一次启动弹两次。
     private func tryTriggerPaywall() {
         guard entitlementReady, splashSequenceDone, !didTriggerPaywall else { return }
+        #if DEBUG
+        // 联调/截图：PAY_DEBUG_NO_WALL=1 抑制冷启动订阅墙（功能页截图用，仅 DEBUG）。
+        // UserDefaults(debug.noWall=1) 等效兜底——沙盒 shell 下 SIMCTL_CHILD_* env 注入不稳定。
+        if ProcessInfo.processInfo.environment["PAY_DEBUG_NO_WALL"] == "1" { return }
+        if UserDefaults.standard.bool(forKey: "debug.noWall") { return }
+        #endif
         if capabilities.pay.isPro { return }   // 已订阅 → 什么都不弹
-        // 引导流程显示中不弹（引导末尾自带订阅页）；needsOnboarding 含 DEBUG 老用户覆盖
-        guard !needsOnboarding else { return }
+        // 引导流程显示中不弹（引导末尾自带订阅页）；needsOnboarding 含 DEBUG 老用户覆盖。
+        // 【防二弹·时序】splashSequenceDidFinish 通知可能晚于引导完成到达（低端机视频解码慢、
+        // 用户快速走完引导）：此刻 needsOnboarding 已 false、didTriggerPaywall 仍 false，
+        // 冷启动订阅墙（unlock，含终身卡）会再弹一次——用户在引导后看到"终身会员订阅页"即此因。
+        // finishedOnboarding==true 说明本次启动已走过引导（末页自带订阅页），直接跳过。
+        guard !needsOnboarding, !finishedOnboarding else { return }
         didTriggerPaywall = true
         paywallVariant = .unlock
         DispatchQueue.main.async { showPaywall = true }
+    }
+
+    /// 触发权限流程（ATT → 通知 → 定位）：订阅链路（订阅页/挽留页/引导）彻底结束后才跑。
+    /// 系统权限弹窗一次只显示一个，PermissionFlowController 内部 await 串行；
+    /// 定位由 NavKit 监听 `.permissionFlowDidFinish` 后调 LocationService 请求。
+    /// 首次之后不重复弹（UserDefaults 标记）。
+    ///
+    /// 【Bug 修复·行6/7】此前门控读 `showPaywall || showRetention` 的瞬时 UI 状态：
+    /// `tryTriggerPaywall` 用 `DispatchQueue.main.async` 延迟一帧才置 `showPaywall = true`，
+    /// 同帧触发的权限流程读到 false 就直接开跑 → ATT 弹窗被订阅页盖住（用户永远看不到）
+    /// 或时序上抢在订阅页前弹（观感即"没拉起"）。改用链路状态判断：
+    /// didTriggerPaywall=true 表示订阅墙已在本轮启动弹出，必须等订阅链路走完（seenPaywall）。
+    private func tryTriggerPermissionFlow() {
+        // 本轮启动已拉起订阅墙但链路未走完（订阅页/挽留页还在）→ 等后续关闭回调再触发
+        if didTriggerPaywall && !seenPaywall { return }
+        // 挽留页正在展示 → 等
+        if showRetention { return }
+        Task { @MainActor in
+            await PermissionFlowController.runIfNeeded()
+        }
     }
 
     /// 挽留页门控：配置开启 + 未购过挽留 + 无订阅历史。

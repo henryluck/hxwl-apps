@@ -13,6 +13,7 @@ struct ShellRootView: View {
     /// 挽留限购一次：购买过挽留产品后置 true，不再弹挽留页（与 RetentionView 联动）
     @AppStorage("hasPurchasedRetention") private var hasPurchasedRetention = false
     @State private var showPaywall = false
+    @State private var showSubscribed = false    // 已订阅页（r24：首页会员图标入口）
     @State private var showRetention = false       // 挽留诱导页（订阅页关闭后弹）
     /// 完成订阅页：购买成功后整屏展示（替代原来的「购买成功」弹窗）
     @State private var showSubscriptionSuccess = false
@@ -81,13 +82,21 @@ struct ShellRootView: View {
             await capabilities.pay.refreshEntitlement()
             entitlementReady = true
             tryTriggerPaywall()
+            // 未订阅召回通知：启动（权益就绪后）同步排班
+            await RetentionLocalNotifications.sync(pay: capabilities.pay)
+            await RetentionLocalNotifications.scheduleVerificationBannerIfRequested()
         }
         .onChange(of: scenePhase) { phase in
             // 回到前台重查权益：isPro 只在启动/购买/交易更新时刷新，
             // App 一直开着跨过到期点（沙盒几分钟一期）不会自动变回未订阅。
             // 各处横幅/订阅墙短路读的都是实时 isPro，此处刷新后 UI 随之更新。
             if phase == .active {
-                Task { await capabilities.pay.refreshEntitlement() }
+                Task {
+                    await capabilities.pay.refreshEntitlement()
+                    // 订阅状态可能在后台变化（沙盒续期/到期/退款）→ 回前台收敛通知排班：
+                    // 未订阅保证已排，已订阅则清掉全部召回通知
+                    await RetentionLocalNotifications.sync(pay: capabilities.pay)
+                }
             }
         }
         .onAppear {
@@ -112,11 +121,8 @@ struct ShellRootView: View {
                 seenPaywall = false
                 didTriggerPaywall = false
             }
-            // 启动权限申请：老用户（引导已完成）进主界面即触发
-            // （新用户由下面 finishedOnboarding onChange 在引导走完后触发）
-            if finishedOnboarding {
-                PermissionPrimer.requestStartupPermissionsIfNeeded()
-            }
+            // row51：ATT/通知权限弹窗已改为 App 启动即申请（FactoryApp.init），
+            // 与网络权限一样逐个尽早出现，不再由页面出现/引导完成触发。
             // UI 测试钩子：跳过开机引导（截屏对照原型用）。放在 revision 检查之后防止被重置。
             if ProcessInfo.processInfo.arguments.contains("-uitest-skip-onboarding") {
                 lastSeenRevision = spec.revision ?? lastSeenRevision
@@ -144,10 +150,10 @@ struct ShellRootView: View {
                 } else {
                     seenPaywall = true
                 }
-                // 启动权限申请：新用户引导走完后触发（主界面出现时申请，系统弹窗不盖引导页）
-                DispatchQueue.main.async {
-                    PermissionPrimer.requestStartupPermissionsIfNeeded()
-                }
+                // row51：权限申请已移至 App 启动（FactoryApp.init），此处只负责
+                // 未订阅召回通知同步（通知权限由启动流程申请，授权成功的未订阅用户
+                // 此时具备排班条件）
+                Task { await RetentionLocalNotifications.sync(pay: capabilities.pay) }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .switchPluginTab)) { note in
@@ -171,6 +177,18 @@ struct ShellRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: ProtoSubscriptionFlow.didSucceed)) { _ in
             // 购买成功 → 展示「完成订阅页」（购买入口各自收起自己的页面）
             showSubscriptionSuccess = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openSubscribedPage)) { _ in
+            // Bug表r24：已订阅点首页右上角会员图标 → 打开「已订阅页面」
+            showSubscribed = true
+        }
+        .fullScreenCover(isPresented: $showSubscribed) {
+            ProtoSubscribedView(
+                onClose: { showSubscribed = false },
+                onContinue: {
+                    showSubscribed = false
+                    TabSwitcher.switchTo("clean_kit")
+                })
         }
         .fullScreenCover(isPresented: $showPaywall) {
             // 原型版订阅墙（首购/复购按 isIntroEligible 自动切换文案与价格）
@@ -293,7 +311,19 @@ struct ShellRootView: View {
     }
 
     /// 触发订阅页（isPro 短路 + 防重入）
+    /// row47修复（第二版）：上一版盲等 2 秒，但 splash 含开机视频时总时长 > 2s，
+    /// 视频还在播订阅页就盖上来（用户复测「还是老样子，订阅页先出来」）。
+    /// 现改事件驱动：FactoryApp.finishSplashSequence 在 splash 淡出时广播
+    /// .splashSequenceDidFinish，这里监听后再弹——顺序严格正确，不依赖时长估算。
     private func tryTriggerPaywall() {
+        // UI 测试钩子：-uitest-no-paywall 彻底跳过订阅墙/挽留页弹窗。
+        // 背景：R4 规则里「bootCount>=1 的未订阅用户每次冷启动都召回」，
+        // 这会让截屏类 UI 测试被 fullScreenCover 盖住，测不到真实页面。
+        if ProcessInfo.processInfo.arguments.contains("-uitest-no-paywall") {
+            didTriggerPaywall = true
+            seenPaywall = true
+            return
+        }
         guard entitlementReady, !didTriggerPaywall else { return }
         if capabilities.pay.isPro { return }   // 已订阅 → 什么都不弹
         // 引导未完成时不在此弹：OnboardingFlow 末页自带 ProtoPaywallView 承接，
@@ -314,7 +344,41 @@ struct ShellRootView: View {
         if capabilities.pay.hasSubscriptionHistory || bootCount >= 1
             || (!seenPaywall && !isFirstLaunchWithOnboarding) {
             didTriggerPaywall = true
-            DispatchQueue.main.async { showPaywall = true }
+            presentPaywallWhenSplashDone()
+        }
+    }
+
+    /// row47：订阅墙等 splash 真正结束后再弹（事件驱动）。
+    /// - splash 已结束（通知已发过/无 splash 配置）→ 立即弹；
+    /// - splash 播放中 → 挂起，收到 .splashSequenceDidFinish 再弹；
+    /// - 兜底：万一 splash 卡死不发通知（视频解码失败等极端情况），8s 后强制弹，
+    ///   保证订阅墙不会永远不出现。
+    /// @State 写入走闭包直接捕获（struct 无 weak，self 是值类型可安全持有；
+    /// observer 与定时器只在启动期存活，不构成常驻引用）。
+    private func presentPaywallWhenSplashDone() {
+        var splashConfigured = false
+        if let ob = spec.onboarding, ob.splash != nil || ob.splash_video != nil {
+            splashConfigured = true
+        }
+        guard splashConfigured else {
+            showPaywall = true
+            return
+        }
+        var fired = false
+        let fire: () -> Void = {
+            guard !fired else { return }
+            fired = true
+            showPaywall = true
+        }
+        // 通知监听（splash 淡出时 FactoryApp 广播）
+        let observer = NotificationCenter.default.addObserver(
+            forName: .splashSequenceDidFinish, object: nil, queue: .main) { _ in
+            fire()
+        }
+        // 兜底定时器：splash 异常卡死时仍能弹出（正常路径下通知先到，fired 短路定时器）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
+            NotificationCenter.default.removeObserver(observer)
+            fire()
         }
     }
 
@@ -333,7 +397,9 @@ struct ShellRootView: View {
     /// 挽留价是首期优惠；有订阅历史（含到期未续）的用户已无首期资格、
     /// 实扣原价——展示「低价体验」即误导，故此类用户不弹挽留页。
     private var shouldOfferRetention: Bool {
-        paywallConfig.retentionEnabled && !hasPurchasedRetention
+        // UI 测试钩子：-uitest-no-paywall 一并跳过挽留页（限时特惠）
+        if ProcessInfo.processInfo.arguments.contains("-uitest-no-paywall") { return false }
+        return paywallConfig.retentionEnabled && !hasPurchasedRetention
             && !capabilities.pay.hasSubscriptionHistory
     }
 

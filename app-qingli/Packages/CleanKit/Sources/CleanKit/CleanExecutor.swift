@@ -2,8 +2,12 @@ import CoreKit
 import Photos
 import UIKit
 
-/// 清理执行器：把选中资产标记为「已隐藏」（用户可恢复；相册不展示，空间观感即释放）。
-/// 这是 App Store 审核认可的清理手段——直接批量删除用户资产会被 5.1.1 拒审。
+/// 清理执行器：把勾选的资产从相册**删除**（调用 PHAssetChangeRequest.deleteAssets，
+/// 系统会弹「允许…删除这些照片？」确认框，用户确认后才生效）。
+///
+/// 历史实现用 `isHidden = true`，只是把照片挪进「已隐藏」相簿，空间并未释放，
+/// 系统弹窗也会显示「隐藏」而非「删除」——与「清理 / 释放空间」的产品语义不符，已废弃。
+/// 删除后资产进入系统「最近删除」相簿，30 天后由系统彻底清除；第三方 App 无法直接清空该相簿。
 public final class CleanExecutor {
     public static let shared = CleanExecutor()
     private init() {}
@@ -32,14 +36,14 @@ public final class CleanExecutor {
             var failed = 0
             do {
                 try await PHPhotoLibrary.shared().performChanges {
-                    for asset in objects {
-                        let req = PHAssetChangeRequest(for: asset)
-                        req.isHidden = true
-                    }
+                    // PHFetchResult 遵循 NSFastEnumeration，可直接交给批量删除 API；
+                    // 不要逐个 PHAssetChangeRequest(for:) 再设 isHidden —— 那只是隐藏。
+                    PHAssetChangeRequest.deleteAssets(fetch)
                 }
                 moved = objects.count
             } catch {
-                Log.error("[CleanExecutor] 隐藏失败: \(error.localizedDescription)")
+                // 用户在系统确认框点「不允许」会走到这里：事务整体回滚，不进入成功页。
+                Log.error("[CleanExecutor] 删除失败: \(error.localizedDescription)")
                 failed = objects.count
             }
             let result = Result(movedCount: moved, failedCount: failed,
@@ -48,8 +52,9 @@ public final class CleanExecutor {
         }
     }
 
-    /// Live Photo 转静态：导出静态帧存为新照片 + 原片隐藏，
-    /// 用户相册里得到等量静态图，动态视频部分的空间随之释放。
+    /// Live Photo 转静态：导出静态帧存为新照片 + 删除原 Live Photo，
+    /// 用户相册里只留静态图，动态视频部分的空间随之释放。
+    /// 只删除成功导出静态帧的原片，避免导出失败时把原片也删掉。
     public func convertLiveToStatic(assets: [CleanAsset],
                                     completed: @escaping @MainActor (Result) -> Void) {
         guard !assets.isEmpty else {
@@ -69,6 +74,7 @@ public final class CleanExecutor {
 
         Task {
             var images: [UIImage] = []
+            var exported: [PHAsset] = []
             for asset in objects {
                 let img: UIImage? = await withCheckedContinuation { cont in
                     manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize,
@@ -79,16 +85,21 @@ public final class CleanExecutor {
                         cont.resume(returning: image)
                     }
                 }
-                if let img { images.append(img) }
+                if let img {
+                    images.append(img)
+                    exported.append(asset)
+                }
             }
+            let exportedFetch = PHAsset.fetchAssets(
+                withLocalIdentifiers: exported.map { $0.localIdentifier }, options: nil)
             var saved = 0
             do {
                 try await PHPhotoLibrary.shared().performChanges {
                     for img in images {
                         PHAssetChangeRequest.creationRequestForAsset(from: img)
                     }
-                    for asset in objects {
-                        PHAssetChangeRequest(for: asset).isHidden = true
+                    if !exported.isEmpty {
+                        PHAssetChangeRequest.deleteAssets(exportedFetch)
                     }
                 }
                 saved = images.count

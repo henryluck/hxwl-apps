@@ -1,0 +1,5 @@
+module GDTAction {
+    header "Headers/GDTAction.h"
+    header "Headers/GDTAction+convenience.h"
+    export *
+}

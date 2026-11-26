@@ -1,173 +1,320 @@
 import CoreLocation
 import SwiftUI
 
-/// 海拔：真实读数、坐标复制、本机记录（R-028/029/030/031）
+/// 海拔：对齐原型 alt-page-v14（R-028/029/030/031）
+/// 结构：渐变 hero 区（eef8f1→e3f2e8 + 远山插画）+「当前位置海拔」+ 68pt 大数字 +
+/// 状态注记 → alt-content：位置行（图标卡 + 地名 + 重新定位圆钮）→ 经纬度行
+/// （上分隔线 + 复制按钮）→ 主按钮「记录这一刻」→ 次链接「我的海拔记录」。
 struct AltitudeScreen: View {
     @ObservedObject var model: NavAppModel
     @State private var showRecordSheet = false
     @State private var showHistory = false
     @State private var note = ""
     @State private var copied = false
+    /// 【Bug 行43】重新定位的可见反馈：旋转动画 + 完成闪绿
+    @State private var locating = false
+    @State private var refreshedFlash = false
+    @State private var refreshSpin: Double = 360
+    /// 未订阅时锁定数据展示（对齐原型 alt-page-v14 锁定态）：
+    /// 大数字显示「——」占位，胶囊标签为固定 slogan，不暴露真实海拔/更新时间
+    private var locked: Bool { !model.isUnlocked }
+    // 【Bug 行39】记录刷新已改由 NavStores.altitudeRecords @Published + objectWillChange
+    // 转发驱动，不再需要手动刷新令牌
 
     private var snapshot: LocationSnapshot? { model.location.snapshot }
 
     var body: some View {
         ZStack {
-            // 原型 alt-page：浅绿纸感底色（未订阅态也是这个底）
+            // 原型 alt-page：#f6faf7 底色
             Color(hex: "F6FAF7").ignoresSafeArea()
 
-            if !model.isUnlocked {
-                lockedState
-            } else {
-                content
+            VStack(spacing: 0) {
+                hero
+                if locked {
+                    Spacer(minLength: 0)
+                    gate
+                    Spacer(minLength: 0)
+                } else {
+                    ScrollView {
+                        content
+                            .padding(.horizontal, 20)
+                            .padding(.top, 20)
+                            .padding(.bottom, 24)
+                    }
+                }
             }
         }
         .task {
-            if snapshot == nil { await model.locate() }
+            // 锁定态不请求定位（数据已锁，不浪费定位调用）；解锁进入后若无快照再定位
+            if !locked, snapshot == nil { await model.locate() }
         }
         .sheet(isPresented: $showRecordSheet) { recordSheet }
         .sheet(isPresented: $showHistory) { historySheet }
         // 未解锁时连续停留 10 秒自动提醒（关闭订阅页后重新计时）
-        .autoPaywallReminder(active: !model.isUnlocked)
+        .autoPaywallReminder(active: locked)
     }
+
+    // MARK: - Hero 区（alt-hero：实景照片 + 大读数，对齐原型 alt-page-v14）
+
+    private var hero: some View {
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+
+            Spacer(minLength: 10)
+
+            // alt-reading-label
+            Text("当前位置海拔")
+                .font(.system(size: 17))
+                .foregroundStyle(Color(hex: "38624F"))
+
+            // alt-number：68pt 大数字 + 米（深绿 #164E38）；锁定态为「——」占位横线
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                Text(altitudeText)
+                    .font(.system(size: locked ? 44 : 68, weight: .semibold, design: .default))
+                    .monospacedDigit()
+                    .foregroundStyle(Color(hex: "164E38").opacity(locked ? 0.55 : 1))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                Text("米")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(Color(hex: "164E38").opacity(0.85))
+            }
+            .padding(.top, 9)
+
+            // alt-reading-note：胶囊标签「更新于 09月29日 14:32」
+            Text(readingNote)
+                .font(.system(size: 14))
+                .foregroundStyle(Color(hex: "2F5B43"))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color(hex: "F6FAF7").opacity(0.85), in: Capsule())
+                .padding(.top, 6)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 330)
+        .frame(maxWidth: .infinity, alignment: .top)
+        .background(
+            // alt-scene-photo：远山与云海实景，顶部对齐铺满 hero，底部渐隐进页面底色
+            ZStack(alignment: .top) {
+                if let ui = BundleImageLoader.uiImage(named: "assets/alt-hero-photo.jpg") {
+                    Image(uiImage: ui)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    LinearGradient(colors: [Color(hex: "EEF8F1"), Color(hex: "DCEBE4")],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                LinearGradient(stops: [
+                    .init(color: Color(hex: "F6FAF7").opacity(0), location: 0),
+                    .init(color: Color(hex: "F6FAF7").opacity(0), location: 0.72),
+                    .init(color: Color(hex: "F6FAF7").opacity(0.55), location: 0.86),
+                    .init(color: Color(hex: "F6FAF7"), location: 1),
+                ], startPoint: .top, endPoint: .bottom)
+            }
+            .ignoresSafeArea(edges: .top)
+        )
+    }
+
+    private var header: some View {
+        HStack {
+            Text("海拔")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Color(hex: "193E30"))
+            Spacer()
+            // 页头「我的 / 会员」白胶囊（与导航/天气页统一组件，原型 gentle-account）
+            AccountMemberCapsule(model: model)
+        }
+    }
+
+    private var altitudeText: String {
+        // 锁定态：占位横线，不显示真实海拔（原型 alt-number 初始为 ——）
+        guard !locked, let snapshot else { return "——" }
+        let value = Int(snapshot.altitude.rounded())
+        // 原型 toLocaleString('en-US')：千分位
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private var readingNote: String {
+        // 锁定态：固定 slogan（原型 alt-reading-note 锁定时文案）
+        guard !locked else { return "每一段旅程，都值得记录" }
+        guard let snapshot else { return "每一段旅程，都值得记录" }
+        if model.location.authState.isUsable {
+            return "更新于 \(NavFormat.clock(snapshot.timestamp))"
+        }
+        return "定位未更新 · 上次数据 \(NavFormat.clock(snapshot.timestamp))"
+    }
+
+    // MARK: - 内容区（alt-content）
 
     private var content: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("海拔")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(Color(hex: "2F5B43"))
-                        Text(snapshot.map { "更新于 \(NavFormat.clock($0.timestamp))" } ?? "等待定位…")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color(hex: "526E61").opacity(0.8))
-                    }
-                    Spacer()
-                    Button {
-                        Task { await model.locate() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color(hex: "2F5B43"))
-                            .frame(width: 36, height: 36)
-                            .background(Color(hex: "E3F2E8"), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("重新定位")
+        VStack(alignment: .leading, spacing: 0) {
+            // 位置行（alt-position：图标卡 + 标题 + 重新定位圆钮）
+            HStack(spacing: 10) {
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color(hex: "18704E"))
+                    .frame(width: 42, height: 46)
+                    .background(Color(hex: "E3F1E8"), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(placeText)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(Color(hex: "193E30"))
+                        .lineLimit(1)
+                    // 【Bug 行43】副行显示位置概要（地名全称/精度），不再固定「当前位置」
+                    Text(placeSummaryText)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(hex: "536F60"))
+                        .lineLimit(1)
                 }
 
-                VStack(spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(snapshot.map { String(format: "%.0f", $0.altitude) } ?? "--")
-                            .font(.system(size: 68, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color(hex: "2F5B43"))
-                        Text("米")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundStyle(Color(hex: "526E61"))
-                    }
-                    Text(accuracyText)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color(hex: "526E61"))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 22)
-                .background(Color(hex: "EEF8F1"), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                Spacer(minLength: 8)
 
-                HStack(spacing: 10) {
-                    Button {
-                        copyCoordinates()
-                    } label: {
-                        Label(copied ? "已复制" : "复制坐标", systemImage: copied ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Color(hex: "2F5B43"))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(Color(hex: "E3F2E8"), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        note = ""
-                        showRecordSheet = true
-                    } label: {
-                        Label("记录", systemImage: "mappin.and.ellipse")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(Color(hex: "087F5B"), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(snapshot == nil)
-                    .opacity(snapshot == nil ? 0.5 : 1)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    infoRow("当前坐标", snapshot.map { NavFormat.coordinate($0.latitude, $0.longitude) } ?? "—")
-                    infoRow("水平精度", snapshot.map { String(format: "±%.0f 米", $0.horizontalAccuracy) } ?? "—")
-                    infoRow("垂直精度", verticalAccuracyText)
-                    infoRow("定位来源", "设备 GPS / 系统定位服务")
-                }
-                .padding(14)
-                .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
+                // 【Bug 行43】重新定位按钮：加载旋转动画 + 完成反馈（此前点击无响应感）
                 Button {
-                    showHistory = true
-                } label: {
-                    HStack {
-                        Image(systemName: "clock.arrow.circlepath")
-                        Text("海拔记录")
-                            .font(.system(size: 14, weight: .medium))
-                        Spacer()
-                        Text("\(model.stores.altitudeRecords.count) 条")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color(hex: "526E61"))
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color(hex: "526E61").opacity(0.6))
+                    guard !locating else { return }
+                    locating = true
+                    Task {
+                        await model.locate()
+                        // 短暂保留旋转动画，让用户看到刷新完成的过渡
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        locating = false
+                        refreshedFlash = true
+                        try? await Task.sleep(nanoseconds: 900_000_000)
+                        refreshedFlash = false
                     }
-                    .foregroundStyle(Color(hex: "2F5B43"))
-                    .padding(.horizontal, 14)
-                    .frame(height: 50)
-                    .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 18))
+                        .foregroundStyle(refreshedFlash ? Color(hex: "087F5B") : Color(hex: "236949"))
+                        .frame(width: 44, height: 44)
+                        .background(Color.white, in: Circle())
+                        .overlay(Circle().strokeBorder(refreshedFlash ? Color(hex: "087F5B") : Color(hex: "DBE9DF"),
+                                                        lineWidth: 1))
+                        .rotationEffect(.degrees(locating ? refreshSpin : 0))
+                        .animation(locating
+                                   ? .linear(duration: 0.9).repeatForever(autoreverses: false)
+                                   : .easeOut(duration: 0.25),
+                                   value: locating)
                 }
                 .buttonStyle(.plain)
-
-                Text("海拔为设备定位返回值，受遮挡与天气影响存在误差；本 App 不提供气压、含氧量等专业仪表数据。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(hex: "526E61").opacity(0.7))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel(locating ? "正在重新定位" : "重新定位")
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 20)
-        }
-    }
+            .padding(.bottom, 23)
 
-    private var accuracyText: String {
-        guard let snapshot else { return "定位后显示读数" }
-        if snapshot.verticalAccuracy < 0 { return "垂直精度未知" }
-        return String(format: "垂直精度 ±%.0f 米", snapshot.verticalAccuracy)
-    }
+            // 经纬度行（outdoor-coordinates：上分隔线 + 复制按钮）
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("经纬度")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(hex: "506C5B"))
+                    Text(coordinateText)
+                        .font(.system(size: 16, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color(hex: "224E38"))
+                        .textSelection(.enabled)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    copyCoordinates()
+                } label: {
+                    Text(copied ? "已复制" : "复制")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Color(hex: "076447"))
+                        .frame(minWidth: 48)
+                        .frame(height: 44)
+                        .background(Color(hex: "E4F2E9"), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(snapshot == nil)
+                .opacity(snapshot == nil ? 0.5 : 1)
+            }
+            .padding(.vertical, 13)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color(hex: "DCE9DF")).frame(height: 1)
+            }
+            .padding(.bottom, 18)
 
-    private var verticalAccuracyText: String {
-        guard let snapshot, snapshot.verticalAccuracy >= 0 else { return "未提供" }
-        return String(format: "±%.0f 米", snapshot.verticalAccuracy)
-    }
+            // 主按钮「记录这一刻」（alt-record-button）
+            Button {
+                note = ""
+                showRecordSheet = true
+            } label: {
+                Label("记录这一刻", systemImage: "square.and.pencil")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(snapshot == nil ? Color(hex: "687E70") : .white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background(
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .fill(snapshot == nil ? Color(hex: "D9E5DD") : Color(hex: "087F5B"))
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(snapshot == nil)
+            .padding(.bottom, 6)
 
-    private func infoRow(_ title: String, _ value: String) -> some View {
-        HStack {
-            Text(title)
+            // 次链接「我的海拔记录」（alt-record-link）
+            Button {
+                showHistory = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 17))
+                    Text("我的海拔记录")
+                        .font(.system(size: 17))
+                    Spacer()
+                    Text(recordCountText)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(hex: "526F5D"))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color(hex: "526F5D").opacity(0.7))
+                }
+                .foregroundStyle(Color(hex: "26553E"))
+                .frame(height: 62)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(Color(hex: "DFEBE2")).frame(height: 1)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Text("海拔为设备定位返回值，受遮挡与天气影响存在误差；本 App 不提供气压、含氧量等专业仪表数据。")
                 .font(.system(size: 13))
-                .foregroundStyle(Color(hex: "526E61"))
-            Spacer()
-            Text(value)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(hex: "2F5B43"))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .foregroundStyle(Color(hex: "617569"))
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 14)
         }
+    }
+
+    private var recordCountText: String {
+        model.stores.altitudeRecords.isEmpty ? "暂无记录" : "\(model.stores.altitudeRecords.count) 条"
+    }
+
+    private var placeText: String {
+        guard let snapshot else { return "位置暂不可用" }
+        return snapshot.place.name.isEmpty ? "当前位置" : snapshot.place.name
+    }
+
+    /// 【Bug 行43】位置概要：地名全称（市/区）或坐标（反编码缺失时）
+    private var placeSummaryText: String {
+        guard let snapshot else { return "等待定位…" }
+        let place = snapshot.place
+        if !place.city.isEmpty || !place.district.isEmpty {
+            return [place.city, place.district].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+        if !place.address.isEmpty { return place.address }
+        return NavFormat.coordinate(snapshot.latitude, snapshot.longitude)
+    }
+
+    private var coordinateText: String {
+        guard let snapshot else { return "暂不可用" }
+        return NavFormat.coordinate(snapshot.latitude, snapshot.longitude)
     }
 
     private func copyCoordinates() {
@@ -180,112 +327,13 @@ struct AltitudeScreen: View {
         }
     }
 
-    private var recordSheet: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                if let snapshot {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(String(format: "%.0f 米", snapshot.altitude))
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(NavTheme.ink)
-                        Text(NavFormat.coordinate(snapshot.latitude, snapshot.longitude))
-                            .font(.system(size: 12))
-                            .foregroundStyle(NavTheme.inkMute)
-                    }
-                }
-                TextField("备注（选填，最多 80 字）", text: $note, axis: .vertical)
-                    .font(.system(size: 15))
-                    .lineLimit(2...4)
-                    .padding(12)
-                    .background(NavTheme.bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .onChange(of: note) { value in
-                        if value.count > 80 { note = String(value.prefix(80)) }
-                    }
-                Spacer()
-            }
-            .padding(16)
-            .navigationTitle("保存海拔记录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { showRecordSheet = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { saveRecord() }
-                        .disabled(snapshot == nil)
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
+    // MARK: - 锁定态（alt-gate：金边高亮按钮）
 
-    private func saveRecord() {
-        guard let snapshot else { return }
-        let record = NavStores.AltitudeRecord(
-            id: UUID().uuidString,
-            altitude: snapshot.altitude,
-            latitude: snapshot.latitude,
-            longitude: snapshot.longitude,
-            note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-            createdAt: Date())
-        if model.stores.addAltitudeRecord(record) {
-            showRecordSheet = false
-        }
-    }
-
-    private var historySheet: some View {
-        NavigationStack {
-            Group {
-                if model.stores.altitudeRecords.isEmpty {
-                    NavEmptyView(title: "还没有海拔记录", detail: "在海拔页点「记录」保存当前读数")
-                } else {
-                    List {
-                        ForEach(model.stores.altitudeRecords) { record in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(String(format: "%.0f 米", record.altitude))
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(NavTheme.ink)
-                                    Spacer()
-                                    Text(NavFormat.clock(record.createdAt))
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(NavTheme.inkMute)
-                                }
-                                Text(NavFormat.coordinate(record.latitude, record.longitude))
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(NavTheme.inkMute)
-                                if !record.note.isEmpty {
-                                    Text(record.note)
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(NavTheme.inkSoft)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .onDelete { indexSet in
-                            for index in indexSet {
-                                model.stores.deleteAltitudeRecord(id: model.stores.altitudeRecords[index].id)
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("海拔记录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { showHistory = false }
-                }
-            }
-        }
-    }
-
-    private var lockedState: some View {
-        // 原型 alt-gate：浅底居中 + 金色高亮按钮「解锁海拔与记录」
+    private var gate: some View {
         VStack(spacing: 12) {
-            Image(systemName: "mountain.2.fill")
-                .font(.system(size: 26))
-                .foregroundStyle(Color(hex: "B27B24"))
+            // 原型 alt-gate：金色挂锁（lucide lock 几何）
+            LockIcon(color: Color(hex: "B98A2F"))
+                .frame(width: 30, height: 34)
                 .padding(.bottom, 12)
             Text("看看此刻，你在多高的地方")
                 .font(.system(size: 21, weight: .semibold))
@@ -317,4 +365,243 @@ struct AltitudeScreen: View {
         }
         .padding(.horizontal, 32)
     }
+
+    // MARK: - 记录 sheet
+
+    private var recordSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                if let snapshot {
+                    // alt-record-preview：预览卡
+                    HStack(spacing: 15) {
+                        Image(systemName: "mountain.2.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(Color(hex: "346547"))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(String(format: "%.0f 米", snapshot.altitude))
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundStyle(Color(hex: "193E30"))
+                            Text(NavFormat.clock(snapshot.timestamp))
+                                .font(.system(size: 14))
+                                .foregroundStyle(Color(hex: "486557"))
+                        }
+                        Spacer()
+                    }
+                    .padding(17)
+                    .background(Color(hex: "E5F3EA"), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                Text("备注（选填，最多 80 字）")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Color(hex: "526F5D"))
+                TextField("给这次记录写一句话", text: $note, axis: .vertical)
+                    .font(.system(size: 16))
+                    .lineLimit(2...4)
+                    .padding(12)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color(hex: "C9DFD1"), lineWidth: 1)
+                    }
+                    .onChange(of: note) { value in
+                        if value.count > 80 { note = String(value.prefix(80)) }
+                    }
+                Text("自动保存时间、位置与坐标，仅存本机。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color(hex: "526F5D"))
+                Button {
+                    saveRecord()
+                } label: {
+                    Label("保存记录", systemImage: "square.and.arrow.down")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Color(hex: "087F5B"), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(snapshot == nil)
+                Spacer()
+            }
+            .padding(22)
+            .background(Color(hex: "F6FAF7"))
+            .navigationTitle("记录这一刻")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { showRecordSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func saveRecord() {
+        guard let snapshot else { return }
+        let record = NavStores.AltitudeRecord(
+            id: UUID().uuidString,
+            altitude: snapshot.altitude,
+            latitude: snapshot.latitude,
+            longitude: snapshot.longitude,
+            note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+            createdAt: Date())
+        if model.stores.addAltitudeRecord(record) {
+            // 【Bug 行39】@Published 变更经 objectWillChange 转发自动刷新 UI
+            showRecordSheet = false
+        }
+    }
+
+    // MARK: - 历史 sheet
+
+    private var historySheet: some View {
+        NavigationStack {
+            Group {
+                if model.stores.altitudeRecords.isEmpty {
+                    VStack(spacing: 14) {
+                        Image(systemName: "mountain.2")
+                            .font(.system(size: 36))
+                            .foregroundStyle(Color(hex: "47765C"))
+                        Text("还没有海拔记录")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(Color(hex: "193E30"))
+                        Text("在海拔页点击「记录这一刻」。")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color(hex: "526F5D"))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 14) {
+                            ForEach(model.stores.altitudeRecords) { record in
+                                // alt-saved：白卡记录条目
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text(String(format: "%.0f", record.altitude))
+                                            .font(.system(size: 27, weight: .semibold))
+                                            .foregroundStyle(Color(hex: "193E30"))
+                                        Text("米")
+                                            .font(.system(size: 16))
+                                            .foregroundStyle(Color(hex: "526F5D"))
+                                        Spacer()
+                                        Text("记录")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(Color(hex: "526F5D"))
+                                    }
+                                    Text(NavFormat.coordinate(record.latitude, record.longitude))
+                                        .font(.system(size: 14, design: .monospaced))
+                                        .foregroundStyle(Color(hex: "496452"))
+                                    // 【Bug 行21】固定带日期（原来今天显示 HH:mm，跨天回看分不清）
+                                    Text("保存于 \(NavFormat.dateTime(record.createdAt))")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(Color(hex: "496452"))
+                                    if !record.note.isEmpty {
+                                        Text(record.note)
+                                            .font(.system(size: 15))
+                                            .foregroundStyle(Color(hex: "193E30").opacity(0.85))
+                                    }
+                                    HStack {
+                                        Text("\(NavFormat.dateTime(record.createdAt)) 保存")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(Color(hex: "526F5D"))
+                                        Spacer()
+                                        Button {
+                                            model.stores.deleteAltitudeRecord(id: record.id)
+                                        } label: {
+                                            Image(systemName: "trash")
+                                                .font(.system(size: 15))
+                                                .foregroundStyle(Color(hex: "526F5D"))
+                                                // 【Bug 行39】扩大点击热区：15pt 图标太小，
+                                                // 真机上经常点不中表现为"删除没反应"
+                                                .frame(width: 36, height: 36)
+                                                .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(.top, 7)
+                                    .overlay(alignment: .top) {
+                                        Rectangle().fill(Color(hex: "EDF3EE")).frame(height: 1)
+                                    }
+                                }
+                                .padding(16)
+                                .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .strokeBorder(Color(hex: "D7E6DC"), lineWidth: 1)
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .padding(.bottom, 20)
+                    }
+                }
+            }
+            .background(Color(hex: "F6FAF7"))
+            .navigationTitle("我的海拔记录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showHistory = false }
+                }
+            }
+        }
+    }
 }
+
+// MARK: - hero 实景图加载（主 bundle 相对路径；NavKit 无法访问 BaseComponents 的 internal AssetImage）
+
+private enum BundleImageLoader {
+    static func uiImage(named path: String) -> UIImage? {
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent(path) else { return nil }
+        return UIImage(contentsOfFile: url.path)
+    }
+}
+
+// MARK: - 金色挂锁图标（原型 alt-gate 的 lucide lock 几何：锁弓 + 圆角锁体描边 + 锁孔）
+
+private struct LockIcon: View {
+    var color: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            let w = proxy.size.width
+            let h = proxy.size.height
+            let bodyRect = CGRect(x: w * 0.10, y: h * 0.46, width: w * 0.80, height: h * 0.50)
+            let radius = w * 0.16
+            let lineWidth = w * 0.10
+            ZStack {
+                // 锁弓：半圆 + 两段竖线
+                ShackleShape()
+                    .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                // 锁体：圆角矩形描边
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(color, lineWidth: lineWidth)
+                    .frame(width: bodyRect.width, height: bodyRect.height)
+                    .position(x: bodyRect.midX, y: bodyRect.midY)
+                // 锁孔：圆点
+                Circle()
+                    .fill(color)
+                    .frame(width: w * 0.16, height: w * 0.16)
+                    .position(x: w / 2, y: bodyRect.midY - bodyRect.height * 0.08)
+            }
+        }
+    }
+
+    /// 锁弓形状：bodyRect 顶部向上拱起的倒 U
+    private struct ShackleShape: Shape {
+        func path(in rect: CGRect) -> Path {
+            var p = Path()
+            let leftX = rect.width * 0.24
+            let rightX = rect.width * 0.76
+            let topY = rect.height * 0.50
+            let radius = (rightX - leftX) / 2
+            let centerY = topY + radius
+            p.move(to: CGPoint(x: leftX, y: rect.height * 0.96))
+            p.addLine(to: CGPoint(x: leftX, y: centerY))
+            p.addArc(center: CGPoint(x: rect.width / 2, y: centerY),
+                     radius: radius,
+                     startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+            p.addLine(to: CGPoint(x: rightX, y: rect.height * 0.96))
+            return p
+        }
+    }
+}
+

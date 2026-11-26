@@ -2,9 +2,11 @@ import BaseComponents
 import Capabilities
 import CoreKit
 
+// Notification.Name.pluginSubpageDepth 已上移到 CoreKit（r22 个人中心二级页共用）
+// openSubscribedPage 仍在此处（仅 CleanKit 与壳层用）
 extension Notification.Name {
-    /// 插件二级页面深度变化（true=进入二级页，false=回根）——壳层据此隐藏/显示 TabBar
-    public static let pluginSubpageDepth = Notification.Name("pluginSubpageDepth")
+    /// 打开「已订阅页面」（ProtoSubscribedView）——首页已订阅会员入口用
+    public static let openSubscribedPage = Notification.Name("openSubscribedPage")
 }
 import SwiftUI
 
@@ -62,6 +64,24 @@ struct CleanHomeTab: View {
     let context: PluginContext
     var onDepthChange: ((Bool) -> Void)? = nil
 
+    /// row39修复：直接观察 pay 的 objectWillChange，StoreKit 异步恢复购买后
+    /// 首页会员标识立即刷新（原 _ = refresh 脆弱模式在某些 SwiftUI 版本下
+    /// 不触发重算，导致冷启动已订阅但首页显示未开通）。
+    /// context.pay 运行时是 AnyPayService（ObservableObject），用 @ObservedObject 观察。
+    @ObservedObject private var payObserver: AnyPayService
+
+    /// 当前是否已订阅（每次 body 重算，直接读 pay.isPro）
+    private var isProNow: Bool {
+        payObserver.isPro
+    }
+
+    init(context: PluginContext, onDepthChange: ((Bool) -> Void)? = nil) {
+        self.context = context
+        self.onDepthChange = onDepthChange
+        // 工厂装配时 pay 一定是 AnyPayService（Capabilities.swift 里创建的）
+        self._payObserver = ObservedObject(wrappedValue: context.pay as! AnyPayService)
+    }
+
     fileprivate func reportDepth(_ depth: Bool) {
         NotificationCenter.default.post(name: .pluginSubpageDepth,
                                         object: nil,
@@ -79,7 +99,10 @@ struct CleanHomeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             CleanHomeView(theme: context.theme,
-                          isPro: context.pay.isPro,
+                          // 需求6：跟随 pay.objectWillChange 实时刷新（见 isProNow）；
+                          // -uitest-pro 仍保留为测试注入
+                          isPro: isProNow
+                              || ProcessInfo.processInfo.arguments.contains("-uitest-pro"),
                           onDeepClean: { path.append(Route.scan) },
                           openAnalysis: { path.append(Route.analysis) },
                           openCategory: { kind in path.append(Route.detail(kind)) },
@@ -89,10 +112,9 @@ struct CleanHomeTab: View {
                                                               object: nil)
                           },
                           openSubscriptionManage: {
-                              // 需求3：已订阅入口 → App Store 订阅管理页
-                              if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
-                                  UIApplication.shared.open(url)
-                              }
+                              // Bug表r24（用户确认）：已订阅点右上角会员图标 → 打开「已订阅页面」
+                              // （ProtoSubscribedView，展示会员权益生效中 + 管理订阅入口）
+                              NotificationCenter.default.post(name: .openSubscribedPage, object: nil)
                           })
                 .navigationDestination(for: Route.self) { route in
                     destination(route)
@@ -112,13 +134,30 @@ struct CleanHomeTab: View {
             // 深度扫描页：完成后自动接续到智能清理建议页
             CleanScanView { path.append(Route.suggest) }
         case .suggest:
+            // 需求：建议页出现时把栈里的扫描页挤掉（home → suggest），
+            // 从建议页点返回直接回首页，不会再闪过扫描页
             CleanSuggestView(summary: CleanCenter.shared.summary ?? ScanSummary(),
                              onOneTapClean: { oneTapClean() },
                              onOpenCategory: { kind in path.append(Route.detail(kind)) },
                              pay: context.pay)
+                .onAppear {
+                    // 需求4：建议页出现时把栈里的扫描页挤掉（home → suggest），
+                    // 点返回直接回首页，不再闪过扫描页。NavigationPath 无数组初始化器
+                    // （iOS 16 只能 value-codable 逐元素 append），用 removeLast 精确弹掉 scan。
+                    if path.count >= 2 {
+                        // 栈形：[home, scan, suggest] → 一次 removeLast 弹 suggest？
+                        // 不行——需要保留 suggest 在栈顶。iOS 16.0+ 无中间删除 API，
+                        // 用 count 检查后整体重建：先弹到只剩 home，再依次 append suggest。
+                        path = NavigationPath()
+                        path.append(Route.suggest)
+                    }
+                }
         case .analysis:
             StorageAnalysisView(onClean: { path.append(Route.suggest) })
         case .detail(let kind):
+            // 问题1/2修复：详情页用 @State localSummary，init 时从 CleanCenter 取最新值。
+            // removeAssets 直接更新 localSummary + CleanCenter，页面网格立即刷新。
+            // onCleaned 触发重扫：重扫完成前 localSummary 已是最新（删除后的）状态。
             CleanDetailView(kind: kind, summary: CleanCenter.shared.summary ?? ScanSummary(),
                             pay: context.pay) {
                 rescan()
@@ -141,7 +180,8 @@ struct CleanHomeTab: View {
     }
 
     private func rescan() {
-        CleanCenter.shared.summary = nil
+        // 问题1修复：不先置 nil（会丢失详情页 removeAssets 已更新的 summary，
+        // 导致首页短暂显示空列表）。直接异步重扫，完成后替换。
         CleanScanner.shared.scanAll { result in
             CleanCenter.shared.summary = result
         }

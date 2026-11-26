@@ -23,10 +23,20 @@ struct RoutePlanView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .top) {
-                NavMapView(controller: model.mapController,
-                           satellite: false,
-                           showsUserLocation: true) { }
-                    .ignoresSafeArea()
+                // 高德地图（与导航 SDK 同源，坐标系一致 GCJ-02）
+                // 【Bug 行35】onMapReady：地图初始化完成后重画路线——.task 可能先于
+                // 地图挂载执行，首帧画到空地图上导致"进规划页看不到路线"
+                AMapPlanMapView(onUserInteraction: { }, onMapReady: {
+                    // 【Bug 行33/44·修复静态初始化崩溃】视野重置也移到地图就绪后——
+                    // onAppear 阶段直接访问 map.userLocation 会驱动 MAMapKit 内部
+                    // 纹理管理器提前构造（vmap GlobalCustomTextureObserver 崩溃）
+                    if model.engine.routes.isEmpty {
+                        PlanMapHolder.shared.resetToUserLocation()
+                    } else {
+                        refreshPlanMap()
+                    }
+                })
+                .ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     topBar
@@ -44,13 +54,36 @@ struct RoutePlanView: View {
         .task {
             if model.engine.routes.isEmpty, model.destination != nil {
                 await model.plan()
-            } else if let route = model.engine.selectedRoute {
-                model.mapController.showRoute(route.polyline,
-                                              origin: model.originDisplay,
-                                              destination: model.destination)
-                model.mapController.fitRoute()
             }
+            // 视野重置已移到 onMapReady（地图未就绪时访问 userLocation 会触发
+            // MAMapKit 静态构造崩溃——vmap 纹理管理器）
         }
+        .onChange(of: model.engine.selectedRouteId) { _ in
+            refreshPlanMap()
+        }
+        .onChange(of: model.engine.routes.count) { _ in
+            refreshPlanMap()
+        }
+        // 【Bug 行44·行48】地图实例挂载完成 → 补画一次。修复"首帧只有城市地图没有线路，
+        // 切换出行模式后才出现"：算路完成早于地图初始化时，首次 refreshPlanMap 因
+        // mapView 为 nil 直接 return，路线丢失且无人补画
+        .onReceive(PlanMapHolder.shared.$mapView) { _ in
+            refreshPlanMap()
+        }
+        .onDisappear {
+            // 【Bug 行37/38】任何方式离开规划页（切 tab/进搜索）都作废在途启动，
+            // 防止"其他页面突然进入导航模式"
+            model.engine.cancelPendingStart()
+        }
+    }
+
+    /// 规划页地图：画多方案 + 起终点 + 全览
+    private func refreshPlanMap() {
+        let routes = model.engine.routes
+        guard !routes.isEmpty else { return }
+        PlanMapHolder.shared.showEndpoints(origin: model.originDisplay,
+                                           destination: model.destination)
+        PlanMapHolder.shared.showRoutes(routes, selectedId: model.engine.selectedRouteId)
     }
 
     // MARK: - 顶部起终点
@@ -244,8 +277,9 @@ struct RoutePlanView: View {
             VStack(spacing: 8) {
                 ForEach(model.engine.routes) { route in
                     Button {
+                        // 【Bug 行41·行49】切换方案后保持列表展开（此前 expanded=false
+                        // 缩回摘要态，用户想连续对比多条方案每次都要重新展开）
                         model.selectRoute(route.id)
-                        expanded = false
                     } label: {
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
@@ -336,7 +370,7 @@ struct RoutePlanView: View {
                         .font(.system(size: 13))
                     Spacer()
                     if startFailure == .locationUnavailable || startFailure == .weakLocation {
-                        Button("重试定位") { Task { await model.locate() } }
+                        Button("重试定位") { Task { await retryLocationAndReplan() } }
                             .font(.system(size: 13, weight: .semibold))
                     }
                 }
@@ -386,6 +420,9 @@ struct RoutePlanView: View {
     // MARK: - 动作
 
     private func back() {
+        // 【Bug 行37】退出规划页时作废在途的导航启动（否则晚到的定位成功
+        // 会把用户突然拽进导航模式）
+        model.engine.cancelPendingStart()
         if model.planSource == .nearby, model.nearbyCategory != nil {
             model.backToNearbyList()
         } else {
@@ -466,12 +503,21 @@ struct RoutePlanView: View {
         if let failure { startFailure = failure }
     }
 
+    /// 规划页内的定位重试：走模型层统一入口（重定位成功自动重规划/重启导航），
+    /// 修复「重试定位只挪地图、失败横幅永远不消失」的死循环观感
+    private func retryLocationAndReplan() async {
+        startFailure = nil
+        if let failure = await model.retryLocationAndReload() {
+            startFailure = failure
+        }
+    }
+
     private func handle(_ action: NavFailureAction) {
         switch action {
         case .retry:
             Task { await model.plan() }
         case .retryLocation:
-            Task { await model.locate() }
+            Task { await retryLocationAndReplan() }
         case .openSettings:
             model.location.openAppSettings()
         case .pickPlace:

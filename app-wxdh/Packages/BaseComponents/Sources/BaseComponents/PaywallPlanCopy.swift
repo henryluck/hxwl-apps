@@ -123,7 +123,9 @@ public enum PaywallPlanCopyResolver {
     }
 
     static func defaultPrice(isTrial: Bool, trialDays: Int, intro: String, renewText: String) -> String {
-        isTrial ? "免费试用\(trialDays)天" : "首周 \(intro.replacingOccurrences(of: "¥", with: ""))"
+        // 【Bug 行3·分流路径】价格大字统一「￥X」：套餐标题已含首周语义（新人优惠首周），
+        // 价格不带「首周」前缀；intro 去掉可能的 ¥ 符号再加全角￥。
+        isTrial ? "免费试用\(trialDays)天" : "￥\(intro.replacingOccurrences(of: "¥", with: "").replacingOccurrences(of: "￥", with: ""))"
     }
 
     static func defaultTag(isTrial: Bool) -> String? {
@@ -138,5 +140,16 @@ public enum PaywallPlanCopyResolver {
                                          freezeApplied: Bool,
                                          live: StrategyDecision?) -> StrategyDecision? {
         freezeApplied ? frozen : (live ?? frozen)
+    }
+
+    /// 【D1·1117 复盘移植】兜底→真实单向升级判定：I-1 红线只放开这一向。
+    /// 冻结值是 nil 或兜底（= 展示的 B 只是「决策缺席」而非真实决策）且晚到的是
+    /// 真实决策（isFallback == false）→ 放行升级（如 5.8 → 0 元试用，与广告锚点一致）。
+    /// 真实→真实仍禁止（I-1：价格不得在两个真实决策间热切换）。
+    public static func shouldUpgradeFrozenDecision(frozen: StrategyDecision?,
+                                                   incoming: StrategyDecision?) -> Bool {
+        guard let incoming, !incoming.isFallback else { return false }
+        guard let frozen else { return true }              // 冻结 nil（超时兜底渲染）→ 可升
+        return frozen.isFallback                            // 冻结兜底 → 可升；冻结真实 → 禁止
     }
 }

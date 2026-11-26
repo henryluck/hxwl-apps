@@ -2,6 +2,14 @@ import Foundation
 import OSLog
 import SwiftUI
 
+// MARK: - 跨插件通知名（CoreKit 承载，避免包间反向依赖）
+
+extension Notification.Name {
+    /// 插件二级页面深度变化（true=进入二级页，false=回根）——壳层据此隐藏/显示 TabBar。
+    /// （原定义在 CleanKit，r22 个人中心二级页也要发此通知 → 上移到公共包）
+    public static let pluginSubpageDepth = Notification.Name("pluginSubpageDepth")
+}
+
 // MARK: - 日志（LoggerService 的底层实现，见 Capabilities）
 
 public enum Log {

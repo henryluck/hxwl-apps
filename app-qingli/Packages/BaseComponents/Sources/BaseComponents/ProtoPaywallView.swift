@@ -73,38 +73,50 @@ public struct ProtoPaywallView: View {
                     .ignoresSafeArea(edges: .bottom)
             }
 
-            // 内容列（标题/权益/套餐卡/按钮…），对齐原型 #112（402x874 画布）：
-            //   标题 y410 / 副标题 y454 / 权益行 y490..619 / 套餐卡 y661.5..747.5 /
-            //   「下一步」y760..826 / 合规文字 y843..856（距屏底 18pt）。
-            // 文字块整体贴屏幕下方：顶部 Spacer 吸收全部剩余空间（minLength 286 保证
-            // 在插画之下），底部按原型留 18pt 边距。
+            // 内容列（标题/权益/套餐卡/按钮…），对齐原型 #112（402x874 画布）。
+            // 文字块整体贴屏幕下方：顶部 Spacer 吸收全部剩余空间，底部按原型留 18pt 边距。
+            // 11-22 布局演进史（防止回退）：
+            //   ① Spacer minLength 286 → 386 想压标题到半屏下 → 386 是强制值，
+            //     386+内容+18 超视口，底部合规文字被顶出屏幕（已修）；
+            //   ② 改回 minLength: 0 后标题落在 ~40%，但用户反馈「会员权益」与
+            //     插画背景内容重叠 → minLength: 30 给文字块一个最小下移量，
+            //     Spacer 仍可吸收剩余空间不溢出；同时压缩段距（权益→套餐卡 26→14
+            //     等），把内容块总高压到 ~420pt，标题落在 ~46%（半屏附近）。
             // Bug表R2-3：页面文案固定不能上下滑动 → 一屏排布不滚动；
             // 小屏兜底：FitContentScale 整体等比缩放（锚点底部，贴底不被裁）。
             VStack(spacing: 0) {
-                Spacer(minLength: 286)
+                Spacer(minLength: 30)
                 VStack(spacing: 0) {
                     Text("会员权益")
-                        .font(.system(size: 30, weight: .bold))
+                        .font(.system(size: 34, weight: .bold))
                         .foregroundStyle(titleBlack)
                     Text("释放更多空间，清理更高效")
-                        .font(.system(size: 15))
+                        .font(.system(size: 17))
                         .foregroundStyle(Color(hex: "8A9199"))
-                        .padding(.top, 14)
+                        .padding(.top, 8)
 
                     benefits
-                        .padding(.top, 21)
-
-                    planCard
-                        .padding(.top, 42)
-
-                    mainButton
                         .padding(.top, 12)
 
+                    planCard
+                        .padding(.top, 14)
+
+                    mainButton
+                        .padding(.top, 10)
+
                     complianceText
-                        .padding(.top, 15)
+                        .padding(.top, 10)
                 }
                 .padding(.horizontal, 16)
-                .modifier(FitContentScale(maxHeight: 380))
+                // row46 二次修复：原来 maxHeight=380，主流机型（844~874pt 屏）上文字块
+                // 实际高约 430~460pt，FitContentScale 一直把整块缩到 0.82~0.88 倍——
+                // 用户看到「字比已订阅页小很多」正是这个缩放造成的。提高到 520：
+                // 主流机型完全不触发缩放，只有 SE 类小屏（<568pt 视口）才等比缩。
+                .modifier(FitContentScale(maxHeight: 520))
+                // 11-22：文字块整体再下调（用户两次要求 20pt + 10pt，累计 30pt）——
+                // offset 不改变布局占位，Spacer 自然高度(360pt)远大于 minLength(30)，
+                // 下方有足够余量吸收位移，不会把底部文字推出屏幕。
+                .offset(y: 30)
                 .padding(.bottom, 18)
             }
         }
@@ -153,21 +165,25 @@ public struct ProtoPaywallView: View {
             }
     }
 
-    // MARK: - 权益列表（原型：单列 4 行，21pt 图标 + 17pt 文字，行距 39）
+    // MARK: - 权益列表
+    // row63：四行权益整块**水平居中**；块内图标列**垂直对齐**（同一左缘）。
+    // 实现要点：VStack 用 .leading 对齐（每行 HStack 图标 26pt 固定宽在前，
+    // 图标起点必然同列），外层 .frame(maxWidth: .infinity) 以默认 .center
+    // 对齐居中整个内容块——文字长短不影响图标列，整块视觉居中。
 
     private var benefits: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(benefitItems.enumerated()), id: \.offset) { _, item in
                 HStack(spacing: 12) {
                     AssetMedia(path: "assets/\(item.icon)", contentMode: .fit)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 26, height: 26)
                     Text(item.text)
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(titleBlack)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 套餐卡（浅绿底 + 绿描边；首购带「新人特惠」红标签）
@@ -189,11 +205,11 @@ public struct ProtoPaywallView: View {
                 Text(isFirstPurchase
                      ? "新人首周特惠¥\(introAmount)，之后¥\(renewAmount)/周，支持随时取消"
                      : "续期¥\(renewAmount)/周，自动续费，支持随时取消")
-                    .font(.system(size: 12))
+                    .font(.system(size: 14))
                     .foregroundStyle(subGray)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
+            .padding(.vertical, 13)
             .background(cardFill)
             .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
             .overlay(
@@ -227,9 +243,13 @@ public struct ProtoPaywallView: View {
                 do {
                     try await pay.purchase()
                     if pay.isPro {
-                        // 购买成功 → 壳层统一展示「完成订阅页」（不再是「订阅成功」弹窗）
-                        ProtoSubscriptionFlow.notifySuccess()
+                        // 购买成功 → 先收起订阅墙（fullScreenCover dismiss 动画约 0.3s），
+                        // 再发通知让壳层展示「完成订阅页」——同步发通知时 cover 还在屏幕上，
+                        // ZStack 里的 success view 会被 cover 遮住看不到。
                         closePaywall()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            ProtoSubscriptionFlow.notifySuccess()
+                        }
                     }
                 } catch {
                     purchaseError = error.payUserMessage
@@ -239,7 +259,7 @@ public struct ProtoPaywallView: View {
         } label: {
             Group {
                 if purchasing { ProgressView().tint(.white) }
-                else { Text("下一步").font(.system(size: 20, weight: .medium)) }
+                else { Text("下一步").font(.system(size: 24, weight: .semibold)) }
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
@@ -282,7 +302,7 @@ public struct ProtoPaywallView: View {
             plain(" 和 ")
             linkText("隐私政策") { openLegal(.privacy, url: config.privacyURL, html: config.privacyHTML) }
         }
-        .font(.system(size: 12))
+        .font(.system(size: 14))
         .multilineTextAlignment(.center)
     }
 
@@ -299,13 +319,13 @@ public struct ProtoPaywallView: View {
     }
 
     // MARK: - 顶部按钮（✕ / 恢复购买）
-
+    // row46修复：关闭按钮和恢复购买按钮字号略放大
     private var closeButton: some View {
         Button { closePaywall() } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(titleBlack.opacity(0.75))
-                .padding(9)
+                .padding(10)
         }
         .padding(.leading, 18)
         .padding(.top, 14)
@@ -320,7 +340,7 @@ public struct ProtoPaywallView: View {
             }
         } label: {
             Text("恢复购买")
-                .font(.system(size: 13))
+                .font(.system(size: 15))
                 .foregroundStyle(subGray)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -426,30 +446,39 @@ struct NewbieRibbonLabel: View {
     }
 }
 
-// MARK: - 按钮动效（Bug表R2-2：缩放 + 光效）
+// MARK: - 按钮动效（Bug表R2-2：扫光）
 
-/// 主按钮呼吸光效：高光扫过 + 缩放脉动（用户要求：放大缩小更明显、扫光更亮更快）。
-struct ButtonPulseEffect: ViewModifier {
+/// 主按钮扫光 + 呼吸缩放（row67：用户要求「订阅页按钮没有缩放动态效果」加回缩放）。
+/// 扫光参数：高光亮度 0.28、扫过周期 2.4s、光带窄（宽 40%）。
+/// 缩放实现（重要，勿改回 .animation 挂布局的老写法）：
+///   `scaleEffect` 是**绘制级变换**——不改布局 frame、不产生子视图，
+///   accessibilityFrame 保持原值，不会复发 11-24「按钮上下移动/边界漂移」
+///   （当时根因是 overlay 光带子视图被并进按钮 accessibilityFrame，见
+///   CleanBreathGlowEffect 头注释）。幅度收窄到 1.02，肉眼可感不夸张。
+/// r23：public —— 订阅墙主按钮复用。
+public struct ButtonPulseEffect: ViewModifier {
     @State private var phase: Bool = false
 
-    func body(content: Content) -> some View {
+    public init() {}
+    public func body(content: Content) -> some View {
         content
-            // 缩放幅度 1.015 → 1.03：脉动感更明显
-            .scaleEffect(phase ? 1.03 : 1.0)
             .overlay(
-                // 斜向高光带扫过（亮度 0.28 → 0.5，速度 2.4s → 1.2s）
+                // 斜向高光带扫过（旧版：亮度 0.28、周期 2.4s、光带宽 40%）
                 GeometryReader { geo in
-                    LinearGradient(colors: [.clear, .white.opacity(phase ? 0.5 : 0.0), .clear],
+                    LinearGradient(colors: [.clear, .white.opacity(phase ? 0.28 : 0.0), .clear],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .frame(width: geo.size.width * 0.6)
+                        .frame(width: geo.size.width * 0.4)
                         .offset(x: phase ? geo.size.width * 0.7 : -geo.size.width * 0.7)
-                        .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: false),
+                        .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: false),
                                    value: phase)
                 }
                 .allowsHitTesting(false)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             )
-            .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: phase)
+            // 呼吸缩放：绘制级，1.0↔1.02，周期与扫光一致
+            .scaleEffect(phase ? 1.02 : 1.0)
+            .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                       value: phase)
             .onAppear { phase = true }
     }
 }
@@ -464,7 +493,8 @@ struct FitContentScale: ViewModifier {
     }
 }
 
-/// 限时特惠「立即体验」按钮动效：圆角 r16*k 区域内缩放脉动 + 斜向扫光。
+/// 限时特惠「立即体验」按钮动效：斜向扫光（缩放脉动已按用户要求去除，
+/// 与 ButtonPulseEffect 回退一致——按钮固定尺寸，只有光带扫过）。
 /// position 布局里不能改 frame，扫光用固定 overlay 区域按 k 缩放。
 struct FlashBuyPulse: ViewModifier {
     let k: CGFloat
@@ -474,19 +504,17 @@ struct FlashBuyPulse: ViewModifier {
         content
             .overlay(
                 GeometryReader { geo in
-                    LinearGradient(colors: [.clear, .white.opacity(phase ? 0.42 : 0.0), .clear],
+                    LinearGradient(colors: [.clear, .white.opacity(phase ? 0.28 : 0.0), .clear],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .frame(width: geo.size.width * 0.5)
+                        .frame(width: geo.size.width * 0.4)
                         .offset(x: phase ? geo.size.width : -geo.size.width)
-                        .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: false),
+                        .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: false),
                                    value: phase)
                 }
                 .allowsHitTesting(false)
                 .clipShape(RoundedRectangle(cornerRadius: 16 * k, style: .continuous))
                 .padding(.horizontal, 2)
             )
-            .scaleEffect(phase ? 1.028 : 1.0)
-            .animation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true), value: phase)
             .onAppear { phase = true }
     }
 }
@@ -739,8 +767,11 @@ public struct ProtoFlashSaleView: View {
             if pay.isPro {
                 hasPurchasedRetention = true
                 onClose()
-                // 挽留页购买成功同样进入「完成订阅页」（与主订阅墙一致）
-                ProtoSubscriptionFlow.notifySuccess()
+                // 挽留页购买成功同样进入「完成订阅页」（与主订阅墙一致）。
+                // 等 onClose 的关闭动画走完一帧再发通知，确保 ZStack 层级干净。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    ProtoSubscriptionFlow.notifySuccess()
+                }
             }
         }
     }

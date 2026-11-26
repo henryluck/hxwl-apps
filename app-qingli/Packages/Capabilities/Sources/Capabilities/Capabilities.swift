@@ -1,3 +1,4 @@
+import Combine
 import CoreKit
 import Foundation
 import SwiftUI
@@ -43,11 +44,26 @@ public final class NullPayService: ObservableObject, PayService {
 
 /// 具体类型包装：让 `any PayService` 能用作 `@StateObject` / `environmentObject`
 /// （协议存在式 `any PayService` 不能静态满足 `ObservableObject`，需具体类型承载）。
-/// 当前不转发 objectWillChange（与「工厂已接受 isPro 不自动重渲染」一致；isPro 等读取始终拿到最新值）。
+/// 转发 objectWillChange：StoreKit 异步恢复购买/权益刷新后（isPro 翻转），
+/// 订阅它的视图（首页会员标识等）能立即重渲染，不再依赖切 Tab 重建或轮询兜底。
 @MainActor
 public final class AnyPayService: ObservableObject, PayService {
     private let wrapped: any PayService
-    public init(_ wrapped: any PayService) { self.wrapped = wrapped }
+    /// 转发订阅需持有 cancellable 防止被释放
+    private var cancellable: AnyCancellable?
+    public init(_ wrapped: any PayService) {
+        self.wrapped = wrapped
+        // receive(on: DispatchQueue.main)：内层服务存在后台线程发射 objectWillChange
+        // 的路径（Transaction.updates 循环里 isPro = true），转发必须在主线程 send，
+        // 否则 SwiftUI 主线程检查直接崩
+        if let publisher = wrapped.objectWillChange as? ObservableObjectPublisher {
+            cancellable = publisher
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.objectWillChange.send()
+                }
+        }
+    }
     public var isPro: Bool { wrapped.isPro }
     public var isIntroEligible: Bool { wrapped.isIntroEligible }
     public var hasSubscriptionHistory: Bool { wrapped.hasSubscriptionHistory }

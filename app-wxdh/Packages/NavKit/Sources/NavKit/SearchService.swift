@@ -233,7 +233,12 @@ public final class SearchService: NSObject, ObservableObject {
                     .filter { Geo.distance(center, $0.placemark.coordinate) <= radius }
                     .map { Self.place(from: $0, source: .mapSearch, category: category.title) }
             } catch {
-                failure = Self.classify(error)
+                // 【钓点空列表】搜索零结果在 Apple 地图上可能以 placemarkNotFound 报错，
+                // 这在周边搜索语义里是「附近没有」而非「路线失败」（.noRoute 文案
+                // 「暂未找到适合此方式的路线」是路线语境，用户看到会困惑）——
+                // 周边场景统一按普通服务错误分类，零结果交由上层走空态展示。
+                let classified = Self.classify(error)
+                failure = (classified == .noRoute) ? .serviceError : classified
             }
         }
 
@@ -334,24 +339,27 @@ public final class SearchService: NSObject, ObservableObject {
     /// 地址去掉「中国 + 省 + 市 + 区」前缀，保留可辨认的街道门牌（NAV-09）
     static func cleanAddress(_ raw: String, city: String, district: String) -> String {
         var text = raw
-        for prefix in ["中华人民共和国", "中国"] where text.hasPrefix(prefix) {
+        // 【Bug 行25】MKLocalSearch 对部分地区只返回国名（"中国"/"China"），剥掉后
+        // address 为空 → subtitle 回退 regionLabel（城市+区县），不再显示 "china"
+        for prefix in ["中华人民共和国", "中国", "China", "CHINA", "china"] where text.hasPrefix(prefix) {
             text.removeFirst(prefix.count)
         }
         for part in [city, district] where !part.isEmpty {
             if text.hasPrefix(part) { text.removeFirst(part.count) }
         }
-        // 处理「广东省广州市越秀区」这类未按字段返回的整串前缀
-        if let range = text.range(of: "省") {
-            let head = String(text[text.startIndex...range.upperBound])
-            if head.count <= 8 { text.removeFirst(head.count) }
-        }
-        if let range = text.range(of: "市") {
-            let head = String(text[text.startIndex...range.upperBound])
-            if head.count <= 8 { text.removeFirst(head.count) }
-        }
-        if let range = text.range(of: "区") {
-            let head = String(text[text.startIndex...range.upperBound])
-            if head.count <= 8 { text.removeFirst(head.count) }
+        // 处理「广东省广州市越秀区」这类未按字段返回的整串前缀。
+        // 【崩溃修复】必须用半开区间 ..<，不能用闭区间 ...：
+        //   range(of: "省").upperBound 是「省」之后的位置；当命中字符正好在串尾时
+        //   upperBound == text.endIndex，闭区间会触发 ClosedRange.relative(to:)
+        //   对 endIndex 调 index(after:) → _StringGuts.validateCharacterIndex 越界崩溃
+        //   （线上崩溃：点「充电桩」→ searchNearby → place → cleanAddress）。
+        // 顺带修掉闭区间多吞一个字符的 off-by-one：head 应止于 upperBound 之前，
+        // 否则「广东省广州市」会被截成「州市…」。
+        for delimiter in ["省", "市", "区"] {
+            guard let range = text.range(of: delimiter) else { continue }
+            let headRange = text.startIndex..<range.upperBound   // 含 delimiter 本身
+            guard String(text[headRange]).count <= 8 else { continue }
+            text.removeSubrange(headRange)
         }
         return text.isEmpty ? raw : text
     }

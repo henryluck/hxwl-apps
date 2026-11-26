@@ -1,26 +1,27 @@
 import Foundation
 
-// MARK: - 天枢代理（ios-server）响应模型
+// MARK: - 中台网关（ios-server）响应模型
 //
-// ios-server 把天枢响应原样透传，统一包络：{ success, code, msg, data }。
-// 注意：错误也返回 HTTP 200（code=500x），所以必须解包络、按 success 判断。
+// ios-server 统一包络：{ ok, code, message, result }。
+// 注意：错误也返回 HTTP 200（code=9xxx / 31xxxx 透传），且失败包络不含 result 键，
+// 所以必须解包络、按 ok 判断，不能看 HTTP 状态码。
 
-/// 统一响应包络。`data` 类型由调用方按接口指定。
+/// 统一响应包络。`result` 类型由调用方按接口指定。
 public struct TianxuResponse<T: Decodable>: Decodable {
-    public let success: Bool
+    public let ok: Bool
     public let code: Int?
-    public let msg: String?
-    public let data: T?
+    public let message: String?
+    public let result: T?
 
-    public init(success: Bool, code: Int? = nil, msg: String? = nil, data: T? = nil) {
-        self.success = success
+    public init(ok: Bool, code: Int? = nil, message: String? = nil, result: T? = nil) {
+        self.ok = ok
         self.code = code
-        self.msg = msg
-        self.data = data
+        self.message = message
+        self.result = result
     }
 }
 
-/// 业务错误（success==false 时抛出）。
+/// 业务错误（ok==false 时抛出）。
 public struct TianxuError: Error, CustomStringConvertible {
     public let code: Int?
     public let msg: String?
@@ -28,19 +29,19 @@ public struct TianxuError: Error, CustomStringConvertible {
     public var description: String { "TianxuError(code=\(code ?? -1), msg=\(msg ?? ""))" }
 }
 extension TianxuError: LocalizedError {
-    /// 让 error.localizedDescription 也能看到天枢的 code/msg（默认只显示 "error 1"）。
+    /// 让 error.localizedDescription 也能看到服务端的 code/message（默认只显示 "error 1"）。
     public var errorDescription: String? {
-        "天枢接口失败[code=\(code.map(String.init) ?? "-1")] \(msg ?? "")"
+        "网关接口失败[code=\(code.map(String.init) ?? "-1")] \(msg ?? "")"
     }
 }
 
-/// 「任意 JSON」占位类型：init 不读任何键，可吞掉任意 data（用于只关心 success 的接口）。
+/// 「任意 JSON」占位类型：init 不读任何键，可吞掉任意 result（用于只关心 ok 的接口）。
 public struct TianxuAny: Decodable { public init(from _: Decoder) throws {} }
 
-/// 仅判 success、不关心 data 的接口（统计上报、恢复、支付状态等）的返回占位。
+/// 仅判 ok、不关心 result 的接口（统计上报、恢复、支付状态等）的返回占位。
 public typealias TianxuVoid = TianxuResponse<TianxuAny>
 
-// MARK: - 登录（/api/account/login）
+// MARK: - 登录（/api/v1/session/start）
 
 public struct TianxuLoginData: Decodable {
     public let userId: Int64?
@@ -48,10 +49,11 @@ public struct TianxuLoginData: Decodable {
     /// 天枢下发的业务 token（与代理自管的 Access-Token 不同；客户端存业务用，回传本代理不需要）。
     public let accessToken: String?
     public let prdId: String?
+    /// 风控等待时长（毫秒）。
     public let tongdunTimeout: Int?
 }
 
-// MARK: - 归因（/api/attribution/report）
+// MARK: - 归因（/api/v1/install/attribute）
 
 public struct TianxuAttributionData: Decodable {
     public let activityChannel: Int?
@@ -59,7 +61,7 @@ public struct TianxuAttributionData: Decodable {
     public let marketingPlatform: String?
 }
 
-// MARK: - IAP 商品（/api/iap/products）
+// MARK: - IAP 商品（/api/v1/store/catalog）
 
 public struct TianxuProduct: Decodable, Identifiable {
     public var id: String { commodityId ?? iosProductId ?? UUID().uuidString }
@@ -73,13 +75,13 @@ public struct TianxuProductsData: Decodable {
     public let purchaseCommodities: [TianxuProduct]?
 }
 
-// MARK: - IAP 下单（/api/iap/order）
+// MARK: - IAP 下单（/api/v1/store/order）
 
 public struct TianxuCreateOrderData: Decodable {
     public let orderId: String?
 }
 
-// MARK: - IAP 商品类型（ios-demo Purchase_Product_Type）
+// MARK: - IAP 商品类型（上游 Purchase_Product_Type）
 
 public enum TianxuCommodityProperty: String {
     case consumable      = "TYPE_COMSUMABLE"
@@ -88,8 +90,26 @@ public enum TianxuCommodityProperty: String {
     case nonAutoRenewable = "TYPE_NO_AUTO_RENEWAL"
 }
 
-/// IAP 支付状态（/api/iap/pay-state 的 orderState）。
+/// IAP 支付状态（/api/v1/store/state 的 orderState）。
 public enum TianxuPayState: String {
     case success = "PAY_SUCCESS"
     case failure = "PAY_FAILURE"
+}
+
+// MARK: - 订阅页策略决策（/api/v1/paywall/strategy）
+
+/// 服务端下发的展示文案（任一字段空/缺省 → 客户端回退内置模板）。
+public struct TianxuPaywallCopy: Decodable, Equatable, Sendable {
+    public let launch_price_line: String?
+    public let card_title: String?
+    public let card_desc: String?
+    public let tag: String?
+}
+
+/// 策略决策结果：`plan` 为映射键或 "DEFAULT"（服务端兜底）。
+public struct TianxuPaywallDecision: Decodable, Sendable {
+    public let strategyId: Int?
+    public let plan: String
+    public let productId: String
+    public let copy: TianxuPaywallCopy?
 }

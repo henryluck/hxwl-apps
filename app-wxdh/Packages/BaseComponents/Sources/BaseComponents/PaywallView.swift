@@ -167,6 +167,9 @@ public struct PaywallView: View {
     @State private var legalDoc: LegalKind?        // 协议弹窗
     @State private var plan: PaywallPlan           // 当前选中方案
     @State private var breathing = false           // CTA 呼吸动画相位
+    /// 【扫光动画】高光条是否在扫（false=间歇停顿）；shineX 为 0→1 的扫过进度
+    @State private var shining = false
+    @State private var shineX: CGFloat = 0
     /// 我已阅读并同意隐私政策及会员服务协议（原型默认勾选，可取消）
     @State private var consent = true
     /// 周套餐展示定义（分流启用时由环境注入；key=套餐代号，value=展示定义）
@@ -182,13 +185,23 @@ public struct PaywallView: View {
     public init(config: PaywallConfig, variant: PaywallVariant = .unlock,
                 theme: any ThemeService, pay: any PayService,
                 analytics: (any AnalyticsService)? = nil,
-                onClose: (() -> Void)? = nil) {
+                onClose: (() -> Void)? = nil,
+                preferredPlan: PaywallPlan? = nil) {
         self.config = config
         self.variant = variant
         self.theme = theme
         self.pay = pay
         self.analytics = analytics
         self.onClose = onClose
+        // 选中优先级：调用方指定（会员入口=终身）> spec defaultPlan > 周方案兜底。
+        // 指定方案未启用（如终身未配商品）时自然回退周方案。
+        if let preferredPlan {
+            let usable = preferredPlan == .lifetime
+                ? config.lifetimeEnabled && !config.lifetimeProductID.isEmpty
+                : true
+            _plan = State(initialValue: usable ? preferredPlan : .weekly)
+            return
+        }
         // 需求 03/A02：解锁场景默认选中周方案（终身为可选项）；未配终身商品时自然回退周方案
         let wantsLifetime = config.defaultPlan == "lifetime"
             && config.lifetimeEnabled && !config.lifetimeProductID.isEmpty
@@ -255,12 +268,51 @@ public struct PaywallView: View {
                                               "eligibility": eligibility.rawValue,
                                               "source": variant == .startup ? "onboarding" : "gate"])
         }
+        // 【D1·1117 复盘移植】兜底→真实单向升级：决策链晚于首显 2s 窗落地且用户
+        // 还在本页 → 价格当场翻到真实套餐（如 5.8 → 0 元试用，与广告锚点一致），
+        // 不再「5.8 看到关页」。I-1 红线只放开这一向（真实→真实仍禁止热切换）。
+        .onReceive(strategyStore.$decision) { incoming in
+            guard freezeApplied,
+                  PaywallPlanCopyResolver.shouldUpgradeFrozenDecision(frozen: frozenDecision,
+                                                                      incoming: incoming),
+                  !purchasing, !restoring, !purchaseSuccess, legalDoc == nil
+            else { return }
+            frozenDecision = incoming
+            // 冻结决策与 StoreKit 价格快照同刻重建 → weeklyPurchaseTarget 随之切换，
+            // 展示=扣款（I-2 不破）；重试卡在场也可升（重试按升级后目标下单）
+            Task { await pay.reloadProducts() }
+            strategyStore.noteUpgraded()
+        }
         .onChange(of: canBreathe) { allowed in
             // 呼吸动效：90%→110%→90%，0.8 秒 ease-in-out 循环；
             // 处理中/覆盖弹层/后台/减少动态时恢复 100% 静态
             withAnimation(allowed ? .easeInOut(duration: 0.4).repeatForever(autoreverses: true)
                                   : .easeInOut(duration: 0.2)) {
                 breathing = allowed
+            }
+        }
+        // 【修复】呼吸 + 扫光统一由 task(id: canBreathe) 驱动：
+        // 此前呼吸只靠 onChange，而 canBreathe 初次挂载即为 true（无变化不触发 onChange）
+        // → breathing 恒 false，动画从未跑过。task(id:) 在初次挂载与条件变化时都会执行。
+        // 扫光节奏：每轮 0.6s 快速扫过 + 1.0s 停顿；条件失效（购买中/后台/减少动态）时 task 取消。
+        .task(id: canBreathe) {
+            guard canBreathe else {
+                shining = false
+                withAnimation(.easeInOut(duration: 0.2)) { breathing = false }
+                return
+            }
+            // 启动呼吸（初次挂载路径）
+            withAnimation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true)) {
+                breathing = true
+            }
+            while !Task.isCancelled {
+                // 扫光：起始位置（-0.2 留出斜条完全在外的余量）→ 1.2 扫过
+                shineX = -0.2
+                shining = true
+                withAnimation(.easeInOut(duration: 0.6)) { shineX = 1.2 }
+                try? await Task.sleep(nanoseconds: 650_000_000)
+                shining = false
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
         .onChange(of: plan) { newValue in
@@ -290,11 +342,13 @@ public struct PaywallView: View {
     }
 
     /// 绿幕：把「成片的绿色」压到内容区附近，并用渐变过渡避免裁切硬边。
-    /// 启动场景：图片放大后自带过渡已落到 63–74%，绿幕从 70% 渐显、78% 成实底补足衔接；
+    /// 启动场景：图片放大后自带过渡已落在 63–74%；
+    /// 【调整】实底绿高度再缩小 1/3（原 70%起/78%实底 ≈ 底部 22% → 现 ≈ 底部 14.5%）：
+    /// 绿幕从 78% 渐显、85% 成实底，主视觉（箭头/公路）多露出约 7% 高度。
     /// 解锁场景内容多、标题更高，起点相应上移。
     private var greenWash: LinearGradient {
-        let start: CGFloat = variant == .startup ? 0.70 : 0.34
-        let solid: CGFloat = variant == .startup ? 0.78 : 0.47
+        let start: CGFloat = variant == .startup ? 0.78 : 0.34
+        let solid: CGFloat = variant == .startup ? 0.85 : 0.47
         return LinearGradient(stops: [
             .init(color: Color(hex: "CDE8DC").opacity(0), location: 0),
             .init(color: Color(hex: "CDE8DC").opacity(0), location: start),
@@ -380,7 +434,8 @@ public struct PaywallView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity)
-                .padding(.bottom, 18)
+                // 启动场景标题与价格行的行距：14pt 小字后行距放宽（10→16），各行不挤
+                .padding(.bottom, variant == .startup ? 16 : 18)
 
             switch phase {
             case .active:
@@ -390,7 +445,9 @@ public struct PaywallView: View {
             case .offer:
                 if variant == .startup {
                     startupPriceLine
-                        .padding(.top, 6)
+                        // 价格行与下方按钮区的呼吸空间（2→12）
+                        .padding(.top, 12)
+                        .padding(.bottom, 6)
                 } else {
                     benefitsList
                     plansBlock
@@ -495,29 +552,55 @@ public struct PaywallView: View {
         }
     }
 
-    /// 启动场景的价格行（场景 01/03）：「首周 5.8，之后 ¥58/周」/「¥58/周」。
-    /// 分流模式走 weeklyCopy 三级兜底；未分流传 maintB 现状口径。
+    /// 启动场景的价格行（场景 01/03）。
+    /// 【文案口径】统一模板（A/B/C/D 全套餐同格式）：
+    ///   常规（含 5.8 / 8 / 1.8）：「新用户特惠首周¥X.X，之后¥58/周」
+    ///   免费试用（A）：「新用户特惠免费试用3天，之后¥58/周」
+    /// 【样式调整 2026-11-25】用户反馈字号过小：10 → 12pt（原 10pt 是 Bug 行28 的
+    /// 「再小 2 号」，用户要求回调 2 号），颜色保持浅灰说明性。
+    /// 续费价按生效套餐的 renew（B=58、C/D=48），StoreKit 实价优先。
     private var startupPriceLine: Text {
-        if envSplitEnabled {
-            let copy = weeklyCopy
-            return Text(copy.price).font(.system(size: 18, weight: .semibold))
-                + Text("，").font(.system(size: 18))
-                + Text(copy.subtitle).font(.system(size: 18))
+        let size: CGFloat = 12
+        let ink = Color(hex: "8A8F8C")   // 浅灰（说明性文字，不与正文抢视觉）
+
+        // 生效价格：分流模式取决策套餐（A 试用 / B 5.8 / C 8 / D 1.8）；否则全局配置
+        let isTrial: Bool
+        let introDigitsForLine: String
+        let renewForLine: String
+        if envSplitEnabled, let activePlan {
+            isTrial = activePlan.isTrial
+            introDigitsForLine = activePlan.isTrial
+                ? "\(activePlan.trialDays)"
+                : PaywallPlanCopyResolver.yuan(activePlan.intro)
+            renewForLine = PaywallPlanCopyResolver.isZeroPrice(pay.renewDisplayPrice)
+                ? "¥\(PaywallPlanCopyResolver.yuan(activePlan.renew))"
+                : pay.renewDisplayPrice!
+        } else if config.strategy == "free_trial" {
+            isTrial = true
+            introDigitsForLine = "\(config.trialDays)"
+            renewForLine = renewPrice
+        } else {
+            isTrial = false
+            introDigitsForLine = introDigits
+            renewForLine = renewPrice
         }
-        if config.strategy == "free_trial" {
-            return Text("免费试用 ").font(.system(size: 18))
-                + Text("\(config.trialDays)").font(.system(size: 18, weight: .semibold))
-                + Text(" 天，之后 \(renewPrice)/周").font(.system(size: 18))
+
+        // 免费试用：「新用户特惠免费试用3天，之后¥58/周」
+        if isTrial {
+            return Text("新用户特惠免费试用\(introDigitsForLine)天，之后\(renewForLine)/周")
+                .font(.system(size: size))
+                .foregroundColor(ink)
         }
+        // 常规（有首期资格）：「新用户特惠首周¥X.X，之后¥58/周」
         if introAvailable {
-            return Text("首周 ").font(.system(size: 18))
-                + Text(introDigits).font(.system(size: 18, weight: .semibold))
-                + Text("，之后 \(renewPrice)/周").font(.system(size: 18))
+            return Text("新用户特惠首周¥\(introDigitsForLine)，之后\(renewForLine)/周")
+                .font(.system(size: size))
+                .foregroundColor(ink)
         }
         // 场景 03：无首期资格，不出现任何首周暗示
-        return Text("¥").font(.system(size: 18))
-            + Text(Self.amountDigits(renewPrice)).font(.system(size: 18, weight: .semibold))
-            + Text("/周").font(.system(size: 18))
+        return Text("¥\(Self.amountDigits(renewPrice))/周")
+            .font(.system(size: size))
+            .foregroundColor(ink)
     }
 
     /// 方案行：单选圆点 + 名称/说明 + 价格（选中加粗描边）
@@ -607,6 +690,27 @@ public struct PaywallView: View {
                                                      : [Color(hex: "AAC9B9"), Color(hex: "AAC9B9")],
                                    startPoint: .leading, endPoint: .trailing)
                 }
+                // 【扫光动画】白色高光斜条从左到右快速扫过（1.6s 周期，扫过约 0.6s + 停顿），
+                // 与呼吸动效叠加；处理中/后台/减少动态时暂停
+                .overlay {
+                    if shining {
+                        GeometryReader { geo in
+                            let bandWidth = geo.size.width * 0.45
+                            LinearGradient(colors: [.clear,
+                                                    .white.opacity(0.35),
+                                                    .white.opacity(0.55),
+                                                    .white.opacity(0.35),
+                                                    .clear],
+                                           startPoint: .leading, endPoint: .trailing)
+                                .frame(width: bandWidth, height: geo.size.height * 1.6)
+                                .rotationEffect(.degrees(18))
+                                .offset(x: shineX * (geo.size.width + bandWidth) - bandWidth)
+                                .blur(radius: 2)
+                        }
+                        .allowsHitTesting(false)
+                        .clipped()
+                    }
+                }
                 .clipShape(Capsule())
             }
             .disabled(!ctaEnabled || purchasing)
@@ -615,10 +719,12 @@ public struct PaywallView: View {
 
             if phase != .active {
                 consentRow
+                    // 按钮与同意条款的行距（footer spacing 6 之外再加 6pt）
+                    .padding(.top, 6)
             }
         }
         .padding(.horizontal, 22)
-        .padding(.top, 6)
+        .padding(.top, 14)
         .padding(.bottom, 26)
         .readableContentWidth()
     }
@@ -800,15 +906,24 @@ public struct PaywallView: View {
     private func planPrice(_ target: PaywallPlan) -> String {
         guard target == .weekly else { return lifetimePriceText }
         if envSplitEnabled { return weeklyCopy.price }
-        if introAvailable { return "首周 \(introDigits)" }
+        // 【Bug 行3】套餐名已含「首周优惠」语义，价格大字只留金额：加 ￥ 前缀、不带「首周」
+        if introAvailable { return "￥\(introDigits)" }
         return renewPrice
     }
 
     private func planPriceUnit(_ target: PaywallPlan) -> String? {
         guard target == .weekly else { return nil }
-        if introAvailable || config.strategy == "free_trial" { return nil }
+        // 【Bug 行3】有首期价时加 "/周" 单位（此前 nil 导致单位缺失）
+        if config.strategy == "free_trial" { return nil }
+        // 【Bug 行29】首周优惠价是一次性买断首周，不按周计费——单位 "/周" 去掉，
+        // 只显示「￥5.8」；无资格口径（周会员 ¥58/周）保留 /周
+        if introAvailable { return nil }
         return "/周"
     }
+
+    // MARK: - 单元测试快照口径备注：
+    // weeklyCopy.price（分流路径）由 PaywallPlanCopyResolver.defaultPrice 产出「￥X」格式，
+    // 无资格口径「周会员 / ¥58/周」不变；启动行 startupPriceLine 用独立模板不走此函数。
 
     /// "¥188.00" → "188"；"¥5.80" → "5.8"；"¥58" → "58"
     private static func amountDigits(_ raw: String) -> String {

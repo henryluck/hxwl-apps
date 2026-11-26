@@ -12,6 +12,8 @@ packages:
     path: Packages/CleanKit
   CrashBugly:
     path: Packages/Integrations/CrashBugly
+  DigitalUnion:
+    path: Packages/Integrations/DigitalUnion
 targets:
   FactoryCore:
     type: application
@@ -34,6 +36,8 @@ targets:
       - package: BaseComponents
       - package: CleanKit
       - package: CrashBugly
+      - package: DigitalUnion
+        product: DigitalUnionSDK
       - target: CleanLiveActivityExtension
     info:
       path: FactoryCore-Info.plist
@@ -69,8 +73,16 @@ targets:
         PRODUCT_NAME: "垃圾清理助手"
         TARGETED_DEVICE_FAMILY: 1
         SWIFT_VERSION: "5.9"
-        MARKETING_VERSION: "1.1.6"
-        CURRENT_PROJECT_VERSION: "35"
+        MARKETING_VERSION: "1.1.8"
+        # 数盟 SDK 链接：官方说明书 §1.2 要求 libresolv（SPM binaryTarget 挂不了
+        # linkerSettings，由宿主侧承担）；-ObjC 加载 SDK 的 category 方法
+        # 广点通 GDTAction 2.1.4 静态库（真机切片）：module.modulemap 在 Vendor/GDT
+        # 供 import GDTAction（模拟器构建 canImport=false，AttributionSDK 分支不编译）。
+        # -ObjC 必须：SDK 内部靠 category 注入方法，缺失时 GDTAction.start 链
+        # unrecognized selector 崩溃（wxdh ASC 崩溃栈同款教训）
+        OTHER_LDFLAGS[sdk=iphoneos*]: "-ObjC -lresolv $(SRCROOT)/Vendor/GDT/libGDTActionSDK.a"
+        SWIFT_INCLUDE_PATHS[sdk=iphoneos*]: "$(SRCROOT)/Vendor/GDT"
+        CURRENT_PROJECT_VERSION: "42"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         DEVELOPMENT_TEAM: 363GQLCMXG
         CODE_SIGN_STYLE: Automatic
@@ -95,6 +107,15 @@ targets:
     deploymentTarget: "16.1"     # Live Activity 最低 16.1
     sources:
       - Widgets
+      # 锁屏卡片 logo 用的 App 图标（散 .bin 文件，绕开 Xcode PNG 压缩）
+      - path: Widgets/Resources
+        type: group
+      # 扩展专用 Asset Catalog：Live Activity 官方推荐路径，actool 正常编译打包
+      # （Bug表 R33「实时活动卡片图标不对」——扩展原先无 asset catalog，
+      #  只有散 .bin 单一来源，一旦渲染进程读不到就只剩 SF Symbol 色块）
+      # 注意：不要加 type: folder，否则变成 folder.assetcatalog（folder reference）
+      # 原样拷贝、不经过 actool 编译，bundle 里没有 Assets.car
+      - path: Widgets/Assets.xcassets
     info:
       path: Widgets/Info.plist
       properties:
@@ -109,11 +130,16 @@ targets:
         PRODUCT_NAME: CleanLiveActivity
         TARGETED_DEVICE_FAMILY: 1
         SWIFT_VERSION: "5.9"
-        MARKETING_VERSION: "1.1.6"
-        CURRENT_PROJECT_VERSION: "35"
+        MARKETING_VERSION: "1.1.8"
+        CURRENT_PROJECT_VERSION: "42"
         SKIP_INSTALL: YES
         DEVELOPMENT_TEAM: 363GQLCMXG
         CODE_SIGN_STYLE: Automatic
+        # 关闭 PNG 压缩：Live Activity 散 PNG 直读（UIImage(contentsOfFile:)）需要
+        # 原始未压缩 PNG，COMPRESS_PNG_FILES/CRUSH_PNG_FILES 会修改 PNG 内部格式，
+        # 导致渲染进程解码失败图标变黑块/错图
+        COMPRESS_PNG_FILES: NO
+        CRUSH_PNG_FILES: NO
 # 共享 scheme：GUI 归档后自动补齐第三方 SDK dSYM（Bugly 空壳 dylib 无调试段，
 # dsymutil 不会为它产 dSYM，App Store 上传会报 "did not include a dSYM"）
 schemes:

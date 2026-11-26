@@ -1,10 +1,15 @@
+import BaseComponents
 import Capabilities
+import Combine
 import CoreKit
 import Photos
 import SwiftUI
 
 /// 首页：储存空间健康度卡片 + 推荐清理列表 + iPhone 储存分析入口。
 /// 状态机：idle(仪表) → scanning(进度动画) → done(刷新仪表与列表)。
+/// 扫描状态以 CleanScanner.shared 单例为准（跨 Tab/视图重建存活）——
+/// 此前用本地 @State scanning，切 Tab 回来视图重建后状态归零再起第二个扫描，
+/// 两个扫描并发互写 progress 导致加载环错位。
 public struct CleanHomeView: View {
     let theme: any ThemeService
     let isPro: Bool
@@ -13,12 +18,24 @@ public struct CleanHomeView: View {
     let openCategory: (CleanKind) -> Void
 
     @State private var storage = DeviceStorage.current()
-    @State private var scanning = false
+    /// 扫描中状态 = 单例 isScanning（@Published，观察它跨视图重建不丢）
+    @ObservedObject private var scanner = CleanScanner.shared
     @State private var summary: ScanSummary?
     @State private var needsPhotoAuth = false
+    // 11-26：相册权限分流按钮形态——
+    // 有权限才显示带呼吸缩放的「一键智能清理」按钮；无权限显示**完全静态**的
+    // 「获取相册权限」按钮（无呼吸/无扫光），根治无权限态按钮「上下移动」观感。
+    // 初值直接读系统状态，避免首帧先闪一下静态按钮再切成呼吸按钮。
+    @State private var hasPhotoAccess = CleanHomeView.photoAccessGranted
     // 需求：未开相册权限点一键智能清理 → 权限引导弹窗
     @State private var showPhotoAuthAlert = false
+    // 11-22 LA 修复：App 进程生命周期内 onAppear 只自动起扫一次。
+    // （summary != nil 不再阻断起扫，但也不能每次 Tab 切回都重扫——扫描风暴）
+    @State private var hasScannedThisLaunch = false
     @Environment(\.scenePhase) private var scenePhase
+
+    // 问题1修复：监听 CleanCenter 的 objectWillChange，清理后返回首页时自动刷新
+    @ObservedObject private var center = CleanCenter.shared
 
     public init(theme: any ThemeService, isPro: Bool,
                 onDeepClean: @escaping () -> Void,
@@ -52,21 +69,55 @@ public struct CleanHomeView: View {
                     recommendSection
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                // Bug表r23：底部留白加大——自绘 TabBar 高 56pt+10pt，24pt 不够导致
+                // 最后一行推荐卡被 TabBar 遮挡、页面拉到底仍看不到完整卡片
+                .padding(.bottom, 96)
             }
         }
         .navigationBarHidden(true)
         .onAppear {
             storage = DeviceStorage.current()
-            if summary == nil, !scanning {
+            // 11-26：每次出现同步相册权限态（用户可能在系统设置改过权限）
+            hasPhotoAccess = Self.photoAccessGranted
+            // 问题1修复：每次出现时从 CleanCenter 同步最新结果。
+            // ScanSummary.== 已改为精确比较组内资产列表，删除部分照片后一定检测到变化。
+            if let latest = CleanCenter.shared.summary {
+                summary = latest
+            }
+            // 扫描状态以单例为准（问题3：视图重建不重复起扫）。
+            // 11-22 修复「启动时锁屏实时活动卡片没了」：
+            //  旧逻辑只在 summary == nil 时起扫——但 LA 在上次清理完成时已被
+            //  CleanLiveActivityManager.finish 结束，重启后 summary 残留旧值 →
+            //  永不重扫 → 锁屏卡片再也不出现。且首次空相册时 summary 被赋了
+            //  空 summary（非 nil），后续灌入照片也不会触发扫描。
+            //  现改为：**每次冷启动都重扫**（onAppear 在首页首次挂载时执行一次；
+            //  视图重建走 CleanCenter 单例，不会重复进入）。扫描结果刷新 summary，
+            //  发现可清理项即重新拉起 LA。
+            if !scanner.isScanning, !hasScannedThisLaunch {
+                hasScannedThisLaunch = true
                 startScan()
             }
         }
-        .onChange(of: scenePhase) { phase in
-            // 授权回调可能因弹窗被系统层点掉而丢失 → 回到前台时补扫
-            if phase == .active, summary == nil, !scanning {
+        // 问题1修复：监听 CleanCenter 变化，详情页 removeAssets 后首页立即收到通知
+        .onChange(of: center.summary) { (newValue: ScanSummary?) in
+            if let newValue, newValue != summary {
+                summary = newValue
+            }
+        }
+        // 显式标注参数类型，强制选中 iOS 16 的 onChange(of:perform:) 重载
+        // （否则编译器会选 iOS 17 的单参重载，闭包参数被推断成 ()）
+        .onChange(of: scenePhase) { (phase: ScenePhase) in
+            if phase == .active {
                 storage = DeviceStorage.current()
-                startScan()
+                // 11-26：回前台同步相册权限态（去设置授权/拒绝后返回即时生效）
+                hasPhotoAccess = Self.photoAccessGranted
+                // 需求1：后台期间用户可能在系统相册增删照片 → 回前台重扫。
+                // 条件：已起扫过一次（跳过冷启动期的权限弹窗 scene 抖动）+ 不在扫描中。
+                // 11-22：不再要求 summary != nil（空相册首扫的空 summary 也是合法
+                // 状态，之后灌入照片回前台也应重扫出结果并拉起 LA）。
+                if hasScannedThisLaunch, !scanner.isScanning {
+                    startScan()
+                }
             }
         }
         .alert("需要访问照片权限",
@@ -196,18 +247,47 @@ public struct CleanHomeView: View {
         .font(.system(size: 13))
     }
 
+    /// 当前是否已获相册读取权限（authorized / limited）。
+    static var photoAccessGranted: Bool {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        return status == .authorized || status == .limited
+    }
+
+    /// 11-26：按钮按权限分流——
+    /// - 有权限：「一键智能清理」呼吸缩放 + 扫光（row67 沿用）；
+    /// - 无权限：「去开启相册权限」**只留扫光**（11-26 三次反馈：缩放、亮度呼吸
+    ///   都被用户感知为「大幅度上下来回移动」，呼吸彻底去掉——扫光是横向光带
+    ///   Canvas 绘制，不影响 accessibilityFrame，按钮纹丝不动）。
     private var actionButton: some View {
-        CleanPrimaryButton(storage.level.buttonLabel) {
-            // 需求2：未开启相册权限 → 权限引导弹窗（去设置/取消）
-            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-            if status == .authorized || status == .limited {
-                // 一键智能清理 → 深度扫描页；扫描完成由扫描页自动接续到清理建议页
-                onDeepClean()
+        Group {
+            if hasPhotoAccess {
+                CleanPrimaryButton(storage.level.buttonLabel) {
+                    // 有权限 → 深度扫描页；扫描完成由扫描页自动接续到清理建议页
+                    onDeepClean()
+                }
+                .modifier(CleanBreathGlowEffect())   // 呼吸缩放 + 扫光
+                .accessibilityIdentifier("home.primaryAction")
             } else {
-                showPhotoAuthAlert = true
+                // 无权限：只留扫光，无任何呼吸（11-26 用户反馈）。
+                // identifier 沿用 home.primaryAction：HomeButtonStaticTests 等 10+ UI
+                // 测试靠它定位首页主按钮，改动会让测试全部找不到元素。
+                // 用户拒绝过权限后 requestAuthorization 不会再弹系统框，
+                // 点击直接跳系统设置页由用户手动开启。
+                CleanPrimaryButton("去开启相册权限") {
+                    openPhotoSettings()
+                }
+                .modifier(CleanBreathGlowEffect(breathing: .none))
+                .accessibilityIdentifier("home.primaryAction")
             }
         }
-        .accessibilityIdentifier("home.primaryAction")
+    }
+
+    /// 无权限态主按钮 + 卡片「去设置开启」共用：跳系统设置页由用户手动授权。
+    /// （iOS 规则：用户拒绝过一次后 App 内再调 requestAuthorization 不会弹框，
+    ///  只能引导去设置——点主按钮「没反应」的根因。）
+    private func openPhotoSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     private var freeHint: some View {
@@ -248,9 +328,14 @@ public struct CleanHomeView: View {
 
     private var gaugeCardInner: some View {
         VStack(spacing: 14) {
-            if scanning {
-                ScanningIndicator(label: CleanScanner.shared.phaseLabel)
-                    .padding(.vertical, 26)
+            if scanner.isScanning {
+                // 需求2/3：扫描进度数字 0%→100% 动态累加、顺时针环形走满一圈
+                // （progress 直接观察单例，扫描中切 Tab 回来不重建状态、不错位）
+                // row39修复：扫描指示器用固定高度容器，避免扫描完成时高度骤变导致
+                // 下方推荐清理列表上下跳动（即"清理按钮上下浮动"问题）。
+                ScanningIndicator(label: scanner.phaseLabel,
+                                  progress: scanner.progress)
+                    .frame(height: 180, alignment: .center)
             } else {
                 scoreRow
                 gaugeBar
@@ -296,9 +381,7 @@ public struct CleanHomeView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Color(hex: "9AA09C"))
                 Button {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
+                    openPhotoSettings()
                 } label: {
                     Text("去设置开启")
                         .font(.system(size: 14, weight: .semibold))
@@ -357,8 +440,13 @@ public struct CleanHomeView: View {
                         } else {
                             ForEach(thumbs.indices, id: \.self) { idx in
                                 let a = thumbs[idx]
+                                // 问题3修复：按原始宽高比完整显示，横向截图不被裁切
+                                let ratio = a.pixelHeight > 0
+                                    ? CGFloat(a.pixelWidth) / CGFloat(a.pixelHeight)
+                                    : 1.0
                                 AssetThumb(assetID: a.id, isVideo: a.mediaType == .video,
-                                           isLive: a.kind == .livePhotos)
+                                           isLive: a.kind == .livePhotos,
+                                           aspectRatio: ratio)
                                     .frame(width: 70, height: 70)
                                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
@@ -369,7 +457,13 @@ public struct CleanHomeView: View {
                 .padding(14)
             }
         }
+        // 保留原 identifier（既有 UI 测试用 home.kind.X 定位）
         .accessibilityIdentifier("home.kind.\(kind.rawValue)")
+        // 问题1修复的可测锚点：在 label 尾部附上项数，
+        // UI 测试比对清理前后首页卡片是否已同步刷新。
+        // （不用 accessibilityValue：XCUITest 读它不稳定；
+        //   也不改 identifier：会破坏既有 home.kind.X 的定位）
+        .accessibilityLabel("\(kind.title) count=\(count)")
     }
 
     private func kindIcon(_ kind: CleanKind) -> some View {
@@ -389,10 +483,15 @@ public struct CleanHomeView: View {
             .background(RoundedRectangle(cornerRadius: 8).fill(bg))
     }
 
-    /// 该分类的缩略图资产（最多 4 张；Bug表R5-5：不足四张只显示实际数量）
+    /// 该分类的缩略图资产（最多 4 张）
+    /// 问题8修复：从第一组（最新）取前 4 张，确保每次进入 App 显示的照片一致。
+    /// 扫描结果现在按时间倒序稳定排列，不再是字典无序遍历。
     private func thumbAssets(for kind: CleanKind) -> [CleanAsset] {
         guard let s = summary else { return [] }
-        return Array(s.groups(for: kind).flatMap({ $0.assets }).prefix(4))
+        let groups = s.groups(for: kind)
+        if groups.isEmpty { return [] }
+        // 取第一组的全部资产（第一张是最佳，其余按时间倒序），最多 4 张
+        return Array(groups[0].assets.prefix(4))
     }
 
     /// 未扫描时的预估展示值（与原型数值一致的静态提示，扫描后替换为真实值）
@@ -434,15 +533,33 @@ public struct CleanHomeView: View {
             return
         }
         needsPhotoAuth = false
-        scanning = true
+        // 扫描中状态由 CleanScanner.isScanning 驱动（@ObservedObject scanner），
+        // scanAll 自带防重入：进行中会挂接回调，完成时与首个调用方同结果
         CleanScanner.shared.scanAll { result in
+            // row56 修复：后台一段时间回来后，photosd 连接被系统回收，首次
+            // PHAsset.fetchAssets 偶发返回 0 条 → 空结果覆盖旧 summary，
+            // 列表/详情/分析页全部「变空」，只能杀进程重开。
+            // 防御：旧结果非空、新结果为空 → 判定为异常空扫描，保留旧结果
+            // 并延时 3s 自动重扫一次（photosd 连接重建后即可取到真实数据）。
+            if result.totalCleanableCount == 0,
+               let old = summary, old.totalCleanableCount > 0 {
+                Log.warn("[CleanHome] 异常空扫描（旧\(old.totalCleanableCount)项 → 新0项），保留旧结果并重试")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    if !CleanScanner.shared.isScanning {
+                        startScan()
+                    }
+                }
+                return   // 不覆盖 summary / CleanCenter
+            }
             summary = result
             // 同步到全局中心：详情/建议/分析页读的是这一份
             CleanCenter.shared.summary = result
-            scanning = false
             storage = DeviceStorage.current()
             // 扫描发现可清理垃圾 → 启动锁屏实时活动卡片（ActivityKit，非 App 内卡片）
-            if result.totalCleanableBytes > 0 {
+            // UI 测试下不启动：残留的 Live Activity 会让 chronod 在重装时对
+            // 扩展发 kill(9)，连带干扰 App/Runner 生命周期（测试连环 crash）
+            if result.totalCleanableBytes > 0,
+               !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-uitest") }) {
                 CleanLiveActivityManager.showScanResult(
                     cleanableBytes: result.totalCleanableBytes,
                     appName: "垃圾清理助手")
@@ -456,13 +573,13 @@ public struct CleanHomeView: View {
 struct StorageGauge: View {
     let ratio: Double   // 0~1 已用占比
 
-    // 三段效果（用户指定）：第一段红→黄渐变，第二段黄→绿渐变，第三段纯绿
-    // 用户反馈红黄太浅 → 加深（红 E53935→C62828，黄 FDD835→F9A825）
-    private let seg1Start = Color(hex: "C62828")   // 深红
-    private let seg1End = Color(hex: "F9A825")     // 深黄（琥珀）
-    private let seg2Start = Color(hex: "F9A825")   // 深黄（琥珀）
-    private let seg2End = Color(hex: "2E7D32")     // 深绿
-    private let seg3 = Color(hex: "43A047")        // 纯绿（保持不变）
+    // 三段效果（用户指定）：第一段深红→深黄渐变，第二段深黄→深绿渐变，第三段深绿
+    // （此前 seg1End/seg2Start 误用橙色 E65100 → 改回深黄 F9A825，两段交界颜色衔接）
+    private let seg1Start = Color(hex: "B71C1C")   // 深红
+    private let seg1End = Color(hex: "F9A825")     // 深黄
+    private let seg2Start = Color(hex: "F9A825")   // 深黄
+    private let seg2End = Color(hex: "1B5E20")     // 深绿
+    private let seg3 = Color(hex: "2E7D32")        // 深绿
 
     var body: some View {
         GeometryReader { geo in
@@ -486,21 +603,21 @@ struct StorageGauge: View {
                         LinearGradient(colors: [seg1Start, seg1End],
                                        startPoint: .leading, endPoint: .trailing)
                     } dimmed: {
-                        LinearGradient(colors: [seg1Start, seg1End].map { $0.opacity(0.35) },
+                        LinearGradient(colors: [seg1Start, seg1End].map { $0.opacity(0.55) },
                                        startPoint: .leading, endPoint: .trailing)
                     }
                     segment(active: ratio >= 0.5 && ratio < 0.8) {
                         LinearGradient(colors: [seg2Start, seg2End],
                                        startPoint: .leading, endPoint: .trailing)
                     } dimmed: {
-                        LinearGradient(colors: [seg2Start, seg2End].map { $0.opacity(0.35) },
+                        LinearGradient(colors: [seg2Start, seg2End].map { $0.opacity(0.55) },
                                        startPoint: .leading, endPoint: .trailing)
                     }
                     segment(active: ratio < 0.5) {
                         LinearGradient(colors: [seg3, seg3],
                                        startPoint: .leading, endPoint: .trailing)
                     } dimmed: {
-                        LinearGradient(colors: [seg3.opacity(0.35), seg3.opacity(0.35)],
+                        LinearGradient(colors: [seg3.opacity(0.55), seg3.opacity(0.55)],
                                        startPoint: .leading, endPoint: .trailing)
                     }
                 }
@@ -539,28 +656,46 @@ struct StorageGauge: View {
     }
 }
 
-// MARK: - 扫描中指示器
+// MARK: - 扫描中指示器（数字从 0% 累加到 100% + 顺时针环形进度）
 
 struct ScanningIndicator: View {
     let label: String
+    /// 0~1 显示进度（驱动百分比数字与环形进度，扫描完成时到达 1 → 100%）
+    let progress: Double
     @State private var spin = false
+    /// 上一帧进度：新一轮扫描开始时 progress 从 1 跳回 0，
+    /// 若仍挂 easeInOut 动画会看到弧「倒扫一圈」（视觉上就是环错位）——
+    /// 进度下降（重扫复位）时不挂动画直接归零。
+    @State private var lastProgress: Double = 0
 
     var body: some View {
         VStack(spacing: 14) {
             ZStack {
                 Circle()
                     .stroke(CleanPalette.greenPale, lineWidth: 6)
+                // 进度弧：顺时针（0° 起点在顶部，trim 方向即顺时针），扫描结束走满一圈
                 Circle()
-                    .trim(from: 0, to: 0.28)
+                    .trim(from: 0, to: CGFloat(min(max(progress, 0), 1)))
                     .stroke(CleanPalette.green, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                    .rotationEffect(.degrees(spin ? 360 : 0))
-                    .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
+                    .rotationEffect(.degrees(-90))
+                    .animation(progress >= lastProgress ? .easeInOut(duration: 0.3) : nil,
+                               value: progress)
             }
             .frame(width: 52, height: 52)
+            .overlay(
+                // 环心小百分比
+                Text("\(Int((min(max(progress, 0), 1) * 100).rounded()))%")
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color(hex: "2F6E5D"))
+            )
             Text(label.isEmpty ? "正在扫描…" : label)
                 .font(.system(size: 14))
                 .foregroundStyle(Color(hex: "6B7078"))
         }
         .onAppear { spin = true }
+        .onChange(of: progress) { new in
+            lastProgress = new
+        }
     }
 }

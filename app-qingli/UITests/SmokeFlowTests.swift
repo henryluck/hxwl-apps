@@ -42,6 +42,8 @@ final class SmokeFlowTests: XCTestCase {
         var page = 1
         var taps = 0
         while !reachedPaywall && taps < 8 {
+            // 中途弹「登录Apple账户」会吞点击 → 每轮推进前兜底关一次
+            dismissAppleAccountPrompt(XCUIApplication(bundleIdentifier: "com.apple.springboard"))
             let btn = app.buttons["下一步"]
             guard btn.exists, btn.isHittable else { break }
             btn.tap()
@@ -83,7 +85,8 @@ final class SmokeFlowTests: XCTestCase {
         let homeTab = app.buttons["tab.首页"]
         XCTAssertTrue(homeTab.waitForExistence(timeout: 10), "主界面缺少首页 Tab（自绘 TabBar）")
 
-        // 6. 切到「个人中心」
+        // 6. 切到「个人中心」（切 Tab 前再兜底关一次系统弹窗，扫描完成时容易触发沙盒提示）
+        dismissAppleAccountPrompt(XCUIApplication(bundleIdentifier: "com.apple.springboard"))
         app.buttons["tab.个人中心"].tap()
         sleep(2)
         attach(app, "07-主界面-个人中心")
@@ -110,6 +113,22 @@ final class SmokeFlowTests: XCTestCase {
             en.tap()
         }
         sleep(1)
+        // 模拟器环境弹窗兜底：App Store 沙盒「登录Apple账户」提示（取消/好）会盖住 App，
+        // 点击落空、等 idle 超时被测试框架判成 crash。出现就点「取消」。
+        dismissAppleAccountPrompt(springboard)
+    }
+
+    /// 「登录Apple账户」系统弹窗兜底：出现即点「取消」（不登录不影响任何功能）
+    private func dismissAppleAccountPrompt(_ springboard: XCUIApplication) {
+        let alert = springboard.alerts["登录Apple账户"]
+        let enAlert = springboard.alerts["Sign In to Apple Account"]
+        if alert.waitForExistence(timeout: 2) {
+            alert.buttons["取消"].tap()
+            sleep(1)
+        } else if enAlert.waitForExistence(timeout: 1) {
+            enAlert.buttons["Cancel"].tap()
+            sleep(1)
+        }
     }
 
     private func attach(_ app: XCUIApplication, _ name: String) {

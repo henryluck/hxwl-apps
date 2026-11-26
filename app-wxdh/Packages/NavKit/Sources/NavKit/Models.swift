@@ -74,8 +74,14 @@ public struct Place: Identifiable, Equatable, Codable, Sendable {
     }
 
     public var subtitle: String {
-        if !address.isEmpty { return address }
-        return regionLabel
+        // 【Bug 行25】"China"/"中国" 无定位信息量，回退城市+区县；再空则不显示国名
+        let trimmed = address.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty, trimmed.lowercased() != "china", trimmed != "中国" {
+            return trimmed
+        }
+        let label = regionLabel
+        if !label.isEmpty { return label }
+        return trimmed == "中国" || trimmed.lowercased() == "china" ? "" : trimmed
     }
 
     public static func device(lat: Double, lon: Double, accuracy: Double) -> Place {
@@ -238,6 +244,7 @@ public enum NavFailure: Equatable, Sendable {
     case authRequired
     case draftUnconfirmed
     case engineStartFailed
+    case sameOriginDestination   // 【Bug 行16】起终点一致，提前拦截给可理解提示
     case unknown
 
     public var title: String {
@@ -254,6 +261,7 @@ public enum NavFailure: Equatable, Sendable {
         case .authRequired: return "需要会员权益才能使用"
         case .draftUnconfirmed: return "请先选择新的目的地"
         case .engineStartFailed: return "导航启动失败，请重试"
+        case .sameOriginDestination: return "起点和终点不能相同，请更换目的地"
         case .unknown: return "操作未完成，请重试"
         }
     }
@@ -265,7 +273,7 @@ public enum NavFailure: Equatable, Sendable {
         case .locationDenied, .locationServicesOff: return [.openSettings]
         case .offline, .serviceError, .noRoute, .outOfServiceArea, .engineStartFailed, .unknown:
             return [.retry]
-        case .invalidPlace, .draftUnconfirmed: return [.pickPlace]
+        case .invalidPlace, .draftUnconfirmed, .sameOriginDestination: return [.pickPlace]
         case .authRequired: return [.unlock]
         }
     }
@@ -326,10 +334,13 @@ public struct LocationSnapshot: Equatable, Sendable {
 
     /// 有效定位判据（D02：定位年龄 15s、水平精度 50m 为引擎基线，产品待确认）
     public var isUsable: Bool {
-        horizontalAccuracy > 0 && horizontalAccuracy <= 50 && age <= 15
+        // 【Bug 行26】精度门槛 50→100m、时效 15→20s：市区弱信号（室内边缘、高架下）
+        // 常在 50-100m 区间抖动，旧门槛触发频繁「定位弱，正在重新获取」→ 路线重试。
+        // 路线规划对起点精度容忍度是道路级的（后续还有偏航重规划兜底），放宽不损体验。
+        horizontalAccuracy > 0 && horizontalAccuracy <= 100 && age <= 20
     }
 
-    public var isStale: Bool { age > 15 }
+    public var isStale: Bool { age > 20 }
 
     public var isWeak: Bool { horizontalAccuracy > 50 }
 
@@ -382,6 +393,14 @@ public enum NavFormat {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_CN")
         f.dateFormat = Calendar.current.isDateInToday(date) ? "HH:mm" : "M月d日 HH:mm"
+        return f.string(from: date)
+    }
+
+    /// 固定带日期的时间（海拔记录等需要跨天回看的场景，【Bug 行21】）
+    public static func dateTime(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日 HH:mm"
         return f.string(from: date)
     }
 

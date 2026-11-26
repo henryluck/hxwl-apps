@@ -110,6 +110,18 @@ public struct ProtoSettingsView: View {
                                    supportEmail: supportEmail ?? "")
                 }
             }
+            // Bug表r22：个人中心二级页面（意见反馈/关于我们）也要通知壳层隐藏 TabBar，
+            // 否则页面底部仍存在底部导航。机制与 CleanHomeTab.reportDepth 一致。
+            .onChange(of: path) { newPath in
+                NotificationCenter.default.post(name: .pluginSubpageDepth,
+                                                object: nil,
+                                                userInfo: ["depth": newPath.count > 0])
+            }
+            .onAppear {
+                NotificationCenter.default.post(name: .pluginSubpageDepth,
+                                                object: nil,
+                                                userInfo: ["depth": path.count > 0])
+            }
             .overlay(alignment: .top) {
                 if let toast {
                     Text(toast)
@@ -135,16 +147,9 @@ public struct ProtoSettingsView: View {
                     })
             }
             .sheet(item: $legalDoc) { doc in
-                NavigationStack {
-                    LegalDocView(title: doc.title, html: doc.html)
-                        .navigationTitle(doc.title)
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("关闭") { legalDoc = nil }
-                            }
-                        }
-                }
+                LegalDocSheet(kind: doc.isPrivacy ? .privacy : .terms,
+                              url: doc.isPrivacy ? privacyURL : termsURL,
+                              html: doc.isPrivacy ? privacyHTML : termsHTML)
             }
         }
     }
@@ -313,11 +318,13 @@ public struct ProtoSettingsView: View {
     // MARK: - 动作
 
     private func openLegal(kind: LegalDoc.Kind, html: String?, url: URL?) {
+        // 需求：直接打开 URL；网络不可达时显示 App 内缓存文件。
+        // LegalDocSheet 内部处理：在线 → Safari 直出；离线 → 磁盘缓存 → 兜底正文。
+        // 这里先把兜底正文预热进缓存（无网首开也有内容），再弹 sheet。
         if let html, !html.isEmpty {
-            legalDoc = LegalDoc(kind: kind, html: html)
-        } else if let url {
-            openURL(url)
+            LegalDocFetcher.warmCache(kind: kind, html: html)
         }
+        legalDoc = LegalDoc(kind: kind, html: html ?? "")
     }
 
     private func openFeedback() {

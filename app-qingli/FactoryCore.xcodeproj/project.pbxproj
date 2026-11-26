@@ -14,19 +14,26 @@
 		336A6416EF4AF4CE0A255C18 /* DateUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9678CC45E481EF6083D55CD9 /* DateUtil.swift */; };
 		40BCD23B05C9BB301B0B9EE5 /* catalog.json in Resources */ = {isa = PBXBuildFile; fileRef = D1260E783552432AADAF462F /* catalog.json */; };
 		4FA1E3FFC8F2295A950082BE /* FormatHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67A070B574C4D6ED76D6B81C /* FormatHelper.swift */; };
+		4FDF8D1EF0C283ACC22AA2D4 /* AppIcon.bin in Resources */ = {isa = PBXBuildFile; fileRef = 9FE750049BB3EA3D31770147 /* AppIcon.bin */; };
 		51A443145F4FDC03544449B8 /* CleanActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358BBEE62B1552FE701E13AE /* CleanActivityAttributes.swift */; };
 		53B68DC784775B862FCD6391 /* CleanLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7901CBCF8D4DF567681D1A99 /* CleanLiveActivity.swift */; };
 		546D0B253D82779738A26BE4 /* CleanLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D23A2FAAFC1EA5AB451ED0E6 /* CleanLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		553ED5EEB8A438B1726C090C /* RetentionLocalNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC97A7C6F8AB0951B2784B66 /* RetentionLocalNotifications.swift */; };
 		579C18DFF050E30C846D37C0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 75A1DA93BB43F5FAE859C5CC /* Assets.xcassets */; };
 		586F4E61AAF9960E7988A811 /* ShellRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 604AE856C00AE4A71E6A5F3F /* ShellRootView.swift */; };
 		5C9E353209F1481331C1405E /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = E67DDFA684800A61AD2EF506 /* Themes */; };
 		615F74897C5F74EA82E86DD1 /* ProtoTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 767B3F3FA39316A045BF3615 /* ProtoTabBar.swift */; };
 		8641456B2B9AF9493AC90142 /* AppSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33292DED9E150D3BA35CA61E /* AppSpec.swift */; };
+		947F3157E2AC0F96C317BB8B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 41C7212ABFC18E2096FF2E1A /* Assets.xcassets */; };
 		96199C02E58D9DB7C9E16B56 /* FactoryApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16BBC19FA488DFC709B5BDAA /* FactoryApp.swift */; };
+		9661775EDCA88886B659E63C /* DigitalUnionSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 931D9F1E80BA1A3D6175D5D8 /* DigitalUnionSDK */; };
+		995B4EC87731BCB34D2FD9E9 /* DigitalUnionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 080D98878D2308515FFBE001 /* DigitalUnionService.swift */; };
 		A3AA61FEF95401CDD0AA5170 /* PluginRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9856BDC7A72048FF2F555193 /* PluginRegistry.swift */; };
 		A4CD1A41197112922ECF91C9 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 9DA3EE51B6E974507BDB5777 /* assets */; };
 		A57A3FF556CB31CC34766E32 /* theme-packs in Resources */ = {isa = PBXBuildFile; fileRef = 558E6EBCCD4C9931D83AAF4B /* theme-packs */; };
+		A6C75B32FCF9BB7E47878E72 /* AttributionSDK.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4729617C8E813FE51A0091A /* AttributionSDK.swift */; };
 		C95EF26746D5B71EA1C87D3E /* CleanKit in Frameworks */ = {isa = PBXBuildFile; productRef = 22E367014F8BA39560254D82 /* CleanKit */; };
+		CF5BDF4DE7A5FC2BB60ED494 /* LaIconData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71C57DED626A27335917DA8 /* LaIconData.swift */; };
 		D34705EE5E82D0896660A710 /* CoreKit in Frameworks */ = {isa = PBXBuildFile; productRef = B089065E878889D5F1A4A6DD /* CoreKit */; };
 		D73BEFBB6A7A5D8DA4BC1836 /* BaseComponents in Frameworks */ = {isa = PBXBuildFile; productRef = F70E479DEC400C2195BEDB2B /* BaseComponents */; };
 		EBF27F0253A5060CF42FC009 /* CrashBugly in Frameworks */ = {isa = PBXBuildFile; productRef = D48DF744E6DEFF4812F85975 /* CrashBugly */; };
@@ -57,12 +64,15 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		080D98878D2308515FFBE001 /* DigitalUnionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigitalUnionService.swift; sourceTree = "<group>"; };
 		16BBC19FA488DFC709B5BDAA /* FactoryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactoryApp.swift; sourceTree = "<group>"; };
 		2731E15D308781546DBB24DD /* Capabilities */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Capabilities; path = Packages/Capabilities; sourceTree = SOURCE_ROOT; };
+		2D716008FFD5D8A05D729507 /* DigitalUnion */ = {isa = PBXFileReference; lastKnownFileType = folder; name = DigitalUnion; path = Packages/Integrations/DigitalUnion; sourceTree = SOURCE_ROOT; };
 		33292DED9E150D3BA35CA61E /* AppSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSpec.swift; sourceTree = "<group>"; };
 		358BBEE62B1552FE701E13AE /* CleanActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanActivityAttributes.swift; sourceTree = "<group>"; };
 		374C1BCB2150DAB7A778A3A2 /* CoreKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CoreKit; path = Packages/CoreKit; sourceTree = SOURCE_ROOT; };
 		401BF06EE0A2E44336BCDF1C /* spec.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = spec.json; sourceTree = "<group>"; };
+		41C7212ABFC18E2096FF2E1A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		558E6EBCCD4C9931D83AAF4B /* theme-packs */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "theme-packs"; path = "Resources/theme-packs"; sourceTree = SOURCE_ROOT; };
 		604AE856C00AE4A71E6A5F3F /* ShellRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRootView.swift; sourceTree = "<group>"; };
 		61E131EDFDEFDC1F3D9F4BFA /* PermissionPrimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionPrimer.swift; sourceTree = "<group>"; };
@@ -75,12 +85,16 @@
 		9856BDC7A72048FF2F555193 /* PluginRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistry.swift; sourceTree = "<group>"; };
 		9C994F39CF5D619402CB6906 /* BaseComponents */ = {isa = PBXFileReference; lastKnownFileType = folder; name = BaseComponents; path = Packages/BaseComponents; sourceTree = SOURCE_ROOT; };
 		9DA3EE51B6E974507BDB5777 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = assets; path = Resources/assets; sourceTree = SOURCE_ROOT; };
+		9FE750049BB3EA3D31770147 /* AppIcon.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; path = AppIcon.bin; sourceTree = "<group>"; };
+		A71C57DED626A27335917DA8 /* LaIconData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaIconData.swift; sourceTree = "<group>"; };
 		ACE980FA606F6745E183D7A3 /* FactoryCore.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FactoryCore.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10F0BB21CF56A44DD0ABED9 /* ColorMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorMath.swift; sourceTree = "<group>"; };
 		D1260E783552432AADAF462F /* catalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = catalog.json; sourceTree = "<group>"; };
 		D23A2FAAFC1EA5AB451ED0E6 /* CleanLiveActivityExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CleanLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		DC97A7C6F8AB0951B2784B66 /* RetentionLocalNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetentionLocalNotifications.swift; sourceTree = "<group>"; };
 		E3D196DDE846C94F693A8437 /* CleanKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CleanKit; path = Packages/CleanKit; sourceTree = SOURCE_ROOT; };
 		E67DDFA684800A61AD2EF506 /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Themes; path = Resources/Themes; sourceTree = SOURCE_ROOT; };
+		F4729617C8E813FE51A0091A /* AttributionSDK.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttributionSDK.swift; sourceTree = "<group>"; };
 		F6AD590F4C7C1D07C147F7ED /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -94,6 +108,7 @@
 				D73BEFBB6A7A5D8DA4BC1836 /* BaseComponents in Frameworks */,
 				C95EF26746D5B71EA1C87D3E /* CleanKit in Frameworks */,
 				EBF27F0253A5060CF42FC009 /* CrashBugly in Frameworks */,
+				9661775EDCA88886B659E63C /* DigitalUnionSDK in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -103,10 +118,12 @@
 		0BF8B8999F338249D05889E2 /* Utils */ = {
 			isa = PBXGroup;
 			children = (
+				F4729617C8E813FE51A0091A /* AttributionSDK.swift */,
 				C10F0BB21CF56A44DD0ABED9 /* ColorMath.swift */,
 				9678CC45E481EF6083D55CD9 /* DateUtil.swift */,
 				67A070B574C4D6ED76D6B81C /* FormatHelper.swift */,
 				61E131EDFDEFDC1F3D9F4BFA /* PermissionPrimer.swift */,
+				DC97A7C6F8AB0951B2784B66 /* RetentionLocalNotifications.swift */,
 			);
 			path = Utils;
 			sourceTree = "<group>";
@@ -115,6 +132,7 @@
 			isa = PBXGroup;
 			children = (
 				33292DED9E150D3BA35CA61E /* AppSpec.swift */,
+				080D98878D2308515FFBE001 /* DigitalUnionService.swift */,
 				16BBC19FA488DFC709B5BDAA /* FactoryApp.swift */,
 				9856BDC7A72048FF2F555193 /* PluginRegistry.swift */,
 				767B3F3FA39316A045BF3615 /* ProtoTabBar.swift */,
@@ -131,6 +149,14 @@
 				ACE980FA606F6745E183D7A3 /* FactoryCore.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		8767DE94AD1685C27B154F19 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				9FE750049BB3EA3D31770147 /* AppIcon.bin */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		B1525EFE34B30058E8C734A8 = {
@@ -150,9 +176,12 @@
 		BDACC8FA819510BC71ACEFD3 /* Widgets */ = {
 			isa = PBXGroup;
 			children = (
+				41C7212ABFC18E2096FF2E1A /* Assets.xcassets */,
 				358BBEE62B1552FE701E13AE /* CleanActivityAttributes.swift */,
 				7901CBCF8D4DF567681D1A99 /* CleanLiveActivity.swift */,
 				F6AD590F4C7C1D07C147F7ED /* Info.plist */,
+				A71C57DED626A27335917DA8 /* LaIconData.swift */,
+				8767DE94AD1685C27B154F19 /* Resources */,
 			);
 			path = Widgets;
 			sourceTree = "<group>";
@@ -175,6 +204,7 @@
 				E3D196DDE846C94F693A8437 /* CleanKit */,
 				374C1BCB2150DAB7A778A3A2 /* CoreKit */,
 				6B3D304289CFEB240050C5F2 /* CrashBugly */,
+				2D716008FFD5D8A05D729507 /* DigitalUnion */,
 			);
 			path = Packages;
 			sourceTree = "<group>";
@@ -187,6 +217,7 @@
 			buildConfigurationList = 8AAFB82930519BA118FAEC8E /* Build configuration list for PBXNativeTarget "CleanLiveActivityExtension" */;
 			buildPhases = (
 				755B0D9A8FECFF8BB4D274B7 /* Sources */,
+				DBFD4C3C3A0DECC2EF37DE2C /* Resources */,
 			);
 			buildRules = (
 			);
@@ -221,6 +252,7 @@
 				F70E479DEC400C2195BEDB2B /* BaseComponents */,
 				22E367014F8BA39560254D82 /* CleanKit */,
 				D48DF744E6DEFF4812F85975 /* CrashBugly */,
+				931D9F1E80BA1A3D6175D5D8 /* DigitalUnionSDK */,
 			);
 			productName = FactoryCore;
 			productReference = ACE980FA606F6745E183D7A3 /* FactoryCore.app */;
@@ -260,6 +292,7 @@
 				3594EE3C537FA243592042FD /* XCLocalSwiftPackageReference "Packages/CleanKit" */,
 				7CCC55A0075B4F041FF8F37C /* XCLocalSwiftPackageReference "Packages/CoreKit" */,
 				D4CBDEEC7A64AB8F3F0B7DB1 /* XCLocalSwiftPackageReference "Packages/Integrations/CrashBugly" */,
+				B9E9CB71F4771713E42FE031 /* XCLocalSwiftPackageReference "Packages/Integrations/DigitalUnion" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7DA23C2CBE1AD814EDB4D7BD /* Products */;
@@ -283,6 +316,15 @@
 				40BCD23B05C9BB301B0B9EE5 /* catalog.json in Resources */,
 				051645EDB1103A0BA72748CE /* spec.json in Resources */,
 				A57A3FF556CB31CC34766E32 /* theme-packs in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBFD4C3C3A0DECC2EF37DE2C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4FDF8D1EF0C283ACC22AA2D4 /* AppIcon.bin in Resources */,
+				947F3157E2AC0F96C317BB8B /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -316,6 +358,7 @@
 			files = (
 				51A443145F4FDC03544449B8 /* CleanActivityAttributes.swift in Sources */,
 				53B68DC784775B862FCD6391 /* CleanLiveActivity.swift in Sources */,
+				CF5BDF4DE7A5FC2BB60ED494 /* LaIconData.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -324,13 +367,16 @@
 			buildActionMask = 2147483647;
 			files = (
 				8641456B2B9AF9493AC90142 /* AppSpec.swift in Sources */,
+				A6C75B32FCF9BB7E47878E72 /* AttributionSDK.swift in Sources */,
 				29F31F99DD6832E96F273451 /* ColorMath.swift in Sources */,
 				336A6416EF4AF4CE0A255C18 /* DateUtil.swift in Sources */,
+				995B4EC87731BCB34D2FD9E9 /* DigitalUnionService.swift in Sources */,
 				96199C02E58D9DB7C9E16B56 /* FactoryApp.swift in Sources */,
 				4FA1E3FFC8F2295A950082BE /* FormatHelper.swift in Sources */,
 				191B520274DFA70FFADC1481 /* PermissionPrimer.swift in Sources */,
 				A3AA61FEF95401CDD0AA5170 /* PluginRegistry.swift in Sources */,
 				615F74897C5F74EA82E86DD1 /* ProtoTabBar.swift in Sources */,
+				553ED5EEB8A438B1726C090C /* RetentionLocalNotifications.swift in Sources */,
 				586F4E61AAF9960E7988A811 /* ShellRootView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -350,11 +396,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 35;
+				COMPRESS_PNG_FILES = NO;
+				CRUSH_PNG_FILES = NO;
+				CURRENT_PROJECT_VERSION = 42;
 				DEVELOPMENT_TEAM = 363GQLCMXG;
 				INFOPLIST_FILE = Widgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
-				MARKETING_VERSION = 1.1.6;
+				MARKETING_VERSION = 1.1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hxwl.qlzs.liveactivity;
 				PRODUCT_NAME = CleanLiveActivity;
 				SKIP_INSTALL = YES;
@@ -375,15 +423,17 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 35;
+				CURRENT_PROJECT_VERSION = 42;
 				DEVELOPMENT_TEAM = 363GQLCMXG;
 				INFOPLIST_FILE = "FactoryCore-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 1.1.6;
+				MARKETING_VERSION = 1.1.8;
 				ONLY_ACTIVE_ARCH = YES;
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = "-ObjC -lresolv $(SRCROOT)/Vendor/GDT/libGDTActionSDK.a";
 				PRODUCT_BUNDLE_IDENTIFIER = com.hxwl.qlzs;
 				PRODUCT_NAME = "垃圾清理助手";
 				SWIFT_COMPILATION_MODE = wholemodule;
+				"SWIFT_INCLUDE_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/Vendor/GDT";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -402,15 +452,17 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 35;
+				CURRENT_PROJECT_VERSION = 42;
 				DEVELOPMENT_TEAM = 363GQLCMXG;
 				INFOPLIST_FILE = "FactoryCore-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 1.1.6;
+				MARKETING_VERSION = 1.1.8;
 				ONLY_ACTIVE_ARCH = YES;
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = "-ObjC -lresolv $(SRCROOT)/Vendor/GDT/libGDTActionSDK.a";
 				PRODUCT_BUNDLE_IDENTIFIER = com.hxwl.qlzs;
 				PRODUCT_NAME = "垃圾清理助手";
 				SWIFT_COMPILATION_MODE = wholemodule;
+				"SWIFT_INCLUDE_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/Vendor/GDT";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -421,11 +473,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 35;
+				COMPRESS_PNG_FILES = NO;
+				CRUSH_PNG_FILES = NO;
+				CURRENT_PROJECT_VERSION = 42;
 				DEVELOPMENT_TEAM = 363GQLCMXG;
 				INFOPLIST_FILE = Widgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
-				MARKETING_VERSION = 1.1.6;
+				MARKETING_VERSION = 1.1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hxwl.qlzs.liveactivity;
 				PRODUCT_NAME = CleanLiveActivity;
 				SKIP_INSTALL = YES;
@@ -479,6 +533,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Capabilities;
 		};
+		B9E9CB71F4771713E42FE031 /* XCLocalSwiftPackageReference "Packages/Integrations/DigitalUnion" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Integrations/DigitalUnion;
+		};
 		D4CBDEEC7A64AB8F3F0B7DB1 /* XCLocalSwiftPackageReference "Packages/Integrations/CrashBugly" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Integrations/CrashBugly;
@@ -493,6 +551,10 @@
 		22E367014F8BA39560254D82 /* CleanKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = CleanKit;
+		};
+		931D9F1E80BA1A3D6175D5D8 /* DigitalUnionSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DigitalUnionSDK;
 		};
 		A817CD8E9511CFFB986F0396 /* Capabilities */ = {
 			isa = XCSwiftPackageProductDependency;

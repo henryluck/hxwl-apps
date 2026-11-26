@@ -66,6 +66,9 @@ public final class VoiceService: NSObject, ObservableObject {
         if priority == .terminal {
             pending.removeAll()
             synthesizer.stopSpeaking(at: .immediate)
+            // 【Bug 行53】终态播报多发生在 stopNavi 之后：SDK 音频 teardown 可能
+            // 使已配置的音频会话失效 → 强制下次 pump 重新配置（保证结束播报出声）
+            sessionConfigured = false
             enqueue(text, priority: priority)
             return
         }

@@ -31,7 +31,7 @@ final class PaywallPlanCopyTests: XCTestCase {
                                                    storeKitIntro: nil, storeKitRenew: nil,
                                                    fallbackIntro: "¥5.8", fallbackRenew: "¥58")
         XCTAssertEqual(copy.title, "新人优惠首周")
-        XCTAssertEqual(copy.price, "首周 1.8")
+        XCTAssertEqual(copy.price, "￥1.8")
         XCTAssertEqual(copy.subtitle, "之后¥48/周，自动续费")
         XCTAssertEqual(copy.tag, "新人优惠")
     }
@@ -89,7 +89,7 @@ final class PaywallPlanCopyTests: XCTestCase {
                                                    eligible: true,
                                                    storeKitIntro: "¥8", storeKitRenew: "¥48.00",
                                                    fallbackIntro: "¥5.8", fallbackRenew: "¥58")
-        XCTAssertEqual(copy.price, "首周 8")
+        XCTAssertEqual(copy.price, "￥8")
         XCTAssertEqual(copy.subtitle, "之后¥48.00/周，自动续费")
     }
 
@@ -127,7 +127,7 @@ final class PaywallPlanCopyTests: XCTestCase {
                                                    eligible: true,
                                                    storeKitIntro: "¥0.00", storeKitRenew: "¥0.00",
                                                    fallbackIntro: "¥5.8", fallbackRenew: "¥58")
-        XCTAssertEqual(copy.price, "首周 5.8")
+        XCTAssertEqual(copy.price, "￥5.8")
         XCTAssertFalse(copy.price.contains("0.00"))
         XCTAssertEqual(copy.subtitle, "之后¥58/周，自动续费")
     }
@@ -151,5 +151,40 @@ final class PaywallPlanCopyTests: XCTestCase {
         XCTAssertEqual(PaywallPlanCopyResolver.yuan(58), "58")
         XCTAssertEqual(PaywallPlanCopyResolver.yuan(0), "0")
         XCTAssertEqual(PaywallPlanCopyResolver.yuan(1.8), "1.8")
+    }
+
+    // MARK: - 【1117 复盘移植】D1：兜底→真实单向升级判定
+
+    private func realDecision(_ plan: String = "A") -> StrategyDecision {
+        StrategyDecision(strategyId: 1, plan: plan,
+                         productId: "x.weekly.offer", copy: nil, isFallback: false)
+    }
+    private func fallbackDecision() -> StrategyDecision {
+        StrategyDecision(strategyId: nil, plan: "DEFAULT",
+                         productId: "x.weekly", copy: nil, isFallback: true)
+    }
+
+    /// 冻结 nil（超时兜底渲染）+ 晚到真实 → 放行升级
+    func testUpgradeFromNilFrozenToReal() {
+        XCTAssertTrue(PaywallPlanCopyResolver.shouldUpgradeFrozenDecision(frozen: nil,
+                                                                          incoming: realDecision()))
+    }
+
+    /// 冻结兜底 + 晚到真实 → 放行升级（I-1 只放开这一向）
+    func testUpgradeFromFallbackFrozenToReal() {
+        XCTAssertTrue(PaywallPlanCopyResolver.shouldUpgradeFrozenDecision(frozen: fallbackDecision(),
+                                                                          incoming: realDecision()))
+    }
+
+    /// 冻结真实 + 晚到另一真实 → 禁止（I-1：价格不得在两个真实决策间热切换）
+    func testNoUpgradeBetweenRealDecisions() {
+        XCTAssertFalse(PaywallPlanCopyResolver.shouldUpgradeFrozenDecision(frozen: realDecision("B"),
+                                                                           incoming: realDecision("D")))
+    }
+
+    /// 晚到的还是 fallback → 禁止（fallback 不触发升级）
+    func testNoUpgradeWhenIncomingIsFallback() {
+        XCTAssertFalse(PaywallPlanCopyResolver.shouldUpgradeFrozenDecision(frozen: nil,
+                                                                           incoming: fallbackDecision()))
     }
 }

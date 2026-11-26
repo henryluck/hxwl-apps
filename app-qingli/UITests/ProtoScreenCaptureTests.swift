@@ -11,23 +11,55 @@ final class ProtoScreenCaptureTests: XCTestCase {
 
     @MainActor
     private func launchApp(skipOnboarding: Bool = true,
-                           extraArgs: [String] = []) -> XCUIApplication {
+                           extraArgs: [String] = [],
+                           skipPaywall: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-reset-onboarding", "-uitest-skip-onboarding"] + extraArgs
+        var args = ["-uitest-reset-onboarding", "-uitest-skip-onboarding"]
+        // -uitest-no-paywall：跳过订阅墙/挽留页。
+        // R4 规则「bootCount>=1 的未订阅用户每次冷启动都召回」会让这些
+        // fullScreenCover 盖住被测页面，截屏类用例必须显式关掉。
+        if skipPaywall { args.append("-uitest-no-paywall") }
+        app.launchArguments = args + extraArgs
         app.launch()
-        // 系统照片权限弹窗（SpringBoard 层）兜底
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let zh = springboard.buttons["允许完全访问"]
-        let en = springboard.buttons["Allow Full Access"]
-        if zh.waitForExistence(timeout: 4) {
-            zh.tap()
-            sleep(1)
-        } else if en.waitForExistence(timeout: 2) {
-            en.tap()
-            sleep(1)
+        // 系统照片权限弹窗（SpringBoard 层）兜底。
+        // 注意：弹窗出现时机不稳定（扫描起得越快弹得越早，也可能延后 5s+），
+        // 这里做两轮处理：第一轮常规等待，第二轮在找不到首页按钮时再等一次。
+        handlePhotoPermissionDialog()
+        if !app.buttons["home.primaryAction"].waitForExistence(timeout: 4) {
+            handlePhotoPermissionDialog()
         }
         _ = app.buttons["home.primaryAction"].waitForExistence(timeout: 6)
         return app
+    }
+
+    /// 处理系统照片权限弹窗（中文/英文文案都兜一遍）
+    /// 注意：必须快速返回。逐个 3s 等待 6 个候选会累计 18s，
+    /// 触发 XCUITest 超时被 kill（signal kill）。这里用短超时快速轮询。
+    @MainActor
+    private func handlePhotoPermissionDialog() {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let candidates = ["允许完全访问", "允许访问所有照片", "Allow Full Access",
+                          "Allow Access to All Photos",
+                          // iOS 26 新版照片权限弹窗（英文环境）：完整访问按钮文案
+                          "Allow Full Access & Keep Current Selection",
+                          "Allow Full Access"]
+        for title in candidates {
+            let btn = springboard.buttons[title]
+            if btn.exists {
+                btn.tap()
+                sleep(1)
+                return
+            }
+        }
+        // 弹窗可能刚要出现，短暂等一次即可（不超过 1.5s）
+        for title in candidates {
+            let btn = springboard.buttons[title]
+            if btn.waitForExistence(timeout: 0.4) {
+                btn.tap()
+                sleep(1)
+                return
+            }
+        }
     }
 
     private func snap(_ name: String) {
@@ -149,7 +181,7 @@ final class ProtoScreenCaptureTests: XCTestCase {
     /// 用于核对列表是否铺满可用高度、底部有无多余空白占位。
     @MainActor
     func testCaptureCleanDetailLayout() throws {
-        let app = launchApp()
+        let app = launchApp(skipPaywall: true)
         sleep(5)   // 等首页扫描完成，缩略图稳定
         let pages: [(String, String)] = [
             ("home.kind.similar_photos", "detail_similar_photos"),

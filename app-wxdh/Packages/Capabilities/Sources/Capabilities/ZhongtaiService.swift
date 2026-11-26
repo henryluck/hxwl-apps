@@ -88,7 +88,9 @@ public protocol ZhongtaiService {
     /// 恢复购买。
     func iapRestore(orderInfoList: [[String: Any]]) async throws
     /// 服务端验单（票据校验）。isSandbox：沙盒交易 true（决定 simulatesAskToBuyInSandbox）。
-    func iapVerify(receiptData: String, transactionId: String, orderId: String?, isSandbox: Bool) async throws
+    /// 【G2·文档 8.5.4】amount/currency/promotionAmount：推介优惠金额口径（可选）。
+    func iapVerify(receiptData: String, transactionId: String, orderId: String?, isSandbox: Bool,
+                   amount: String?, currency: String?, promotionAmount: String?) async throws
     /// 上报支付状态。
     func iapReportPayState(state: TianxuPayState, orderId: String?, tranId: String?) async throws
 
@@ -121,7 +123,8 @@ public final class NullZhongtaiService: ZhongtaiService {
     public func iapProducts(type: TianxuCommodityProperty?) async throws -> [TianxuProduct] { [] }
     public func iapCreateOrder(commodityId: String, userId: Int64?) async throws -> String? { nil }
     public func iapRestore(orderInfoList: [[String: Any]]) async throws {}
-    public func iapVerify(receiptData: String, transactionId: String, orderId: String?, isSandbox: Bool) async throws {}
+    public func iapVerify(receiptData: String, transactionId: String, orderId: String?, isSandbox: Bool,
+                          amount: String? = nil, currency: String? = nil, promotionAmount: String? = nil) async throws {}
     public func iapReportPayState(state: TianxuPayState, orderId: String?, tranId: String?) async throws {}
     public func submitFeedback(_ payload: FeedbackPayload) async throws {
         // 未配置网关：FeedbackView 调用前应判 isConfigured 回退 mailto；这里抛错兜底。
@@ -142,11 +145,22 @@ public final class ZhongtaiClient: ZhongtaiService {
     private let appVersion: String
     private let appVersionCode: Int
 
-    public init(config: ZhongtaiConfig, appVersion: String, appVersionCode: Int) {
+    public init(config: ZhongtaiConfig, appVersion: String, appVersionCode: Int,
+                caidProvider: (() -> [String: Any]?)? = nil,
+                digitalUnionProvider: (() async -> String?)? = nil) {
         self.config = config
         self.appVersion = appVersion
         self.appVersionCode = appVersionCode
+        self.caidProvider = caidProvider
+        self.digitalUnionProvider = digitalUnionProvider
     }
+
+    /// 广点通 CAID 提供闭包（壳层注入；归因 zgxMap 用，2026-10-14 定案 body 口径）
+    public private(set) var caidProvider: (() -> [String: Any]?)?
+    /// 数盟 CDID 提供闭包（壳层注入；device/union 真实上报 + 请求头 digitalUnionId 用）
+    public private(set) var digitalUnionProvider: (() async -> String?)?
+    /// 数盟 CDID 缓存（取到真实值后写入请求头；nil=仍占位）
+    private var digitalUnionId: String = "none"
 
     public var isConfigured: Bool {
         !config.prdId.isEmpty && !config.baseURL.isEmpty && !config.aesKey.isEmpty
@@ -182,7 +196,7 @@ public final class ZhongtaiClient: ZhongtaiService {
             "phoneId": "",                  // IDFA（需 ATT 授权；工厂未接归因 SDK，默认空）
             "imei": "",
             "activityChannel": activityChannel,
-            "digitalUnionId": "none",       // 工厂无数盟 SDK
+            "digitalUnionId": digitalUnionId,  // 数盟 CDID（上报成功后为真实值；未取到="none"）
             "timestamp": Int(Date().timeIntervalSince1970 * 1000),
         ]
         if let uid = userId, !forceNoUserId { adhead["userId"] = uid }
@@ -224,15 +238,22 @@ public final class ZhongtaiClient: ZhongtaiService {
     /// 仅判 ok、不关心 result 的接口统一处理。
     @discardableResult
     private func postVoid(_ endpoint: String, data: Any, forceNoUserId: Bool = false) async throws -> Bool {
-        let raw = try await post(endpoint, data: data, forceNoUserId: forceNoUserId)
-        let resp = try decode(TianxuVoid.self, from: raw)
-        guard resp.ok else { throw TianxuError(code: resp.code, msg: resp.message) }
-        return true
+        do {
+            let raw = try await post(endpoint, data: data, forceNoUserId: forceNoUserId)
+            let resp = try decode(TianxuVoid.self, from: raw)
+            guard resp.ok else { throw TianxuError(code: resp.code, msg: resp.message) }
+            Log.info("[Zhongtai] ✓ \(endpoint) ok")
+            return true
+        } catch {
+            Log.error("[Zhongtai] ✗ \(endpoint) 失败: \(error.localizedDescription)")
+            throw error
+        }
     }
 
     // MARK: - 1. 账号
 
     public func login() async throws {
+        Log.info("[Zhongtai] → 登录 session/start")
         let raw = try await post("/api/v1/session/start", data: [:], forceNoUserId: true)
         let resp = try decode(TianxuResponse<TianxuLoginData>.self, from: raw)
         guard resp.ok else { throw TianxuError(code: resp.code, msg: resp.message) }
@@ -241,14 +262,36 @@ public final class ZhongtaiClient: ZhongtaiService {
     }
 
     public func reportAttribution() async throws {
+        Log.info("[Zhongtai] → 归因 install/attribute（先归因后策略决策·时序红线）")
         // 归因请求体：必传字段以天枢 YAPI 27427（appStartNew）为准；
         // iOS 不暴露真实安装时间，用首次启动时间近似。
-        let data: [String: Any] = [
+        var data: [String: Any] = [
             "installTime": Self.installTimeMillis,
             "idfv": await UIDevice.current.identifierForVendor?.uuidString ?? "",
             "newAttribution": 1,
             "oceanengineAttr": 1,
         ]
+        // 【广点通 CAID】平台归因服务从 body 读 zgxMap（2026-10-14 定案）。
+        // 【规则 58 修法清单⑶·server 日志 8.4.2 修复】GDT SDK 初始化需 1-3s（冷启
+        // 窗口必有一次未就绪），而归因紧跟登录（~0.3s）——直接读大概率拿空。
+        // 修：就绪或 ≤2s 有界等待（0.2s 轮询），拿不到放行不挂链（登录/数盟早期
+        // 请求带不上 zgxMap 属预期，服务端有兜底拷贝）。
+        if let caidProvider {
+            var caidMap: [String: Any]?
+            for _ in 0..<10 {   // 0.2s × 10 = 2s 上限
+                if let m = caidProvider(), !m.isEmpty {
+                    caidMap = m
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            if let caidMap {
+                data["zgxMap"] = caidMap
+                Log.info("[归因] zgxMap 已携带（CAID 就绪）")
+            } else {
+                Log.info("[归因] CAID 2s 内未就绪，本次不带 zgxMap（服务端兜底）")
+            }
+        }
         let raw = try await post("/api/v1/install/attribute", data: data)
         let resp = try decode(TianxuResponse<TianxuAttributionData>.self, from: raw)
         guard resp.ok else { throw TianxuError(code: resp.code, msg: resp.message) }
@@ -261,33 +304,64 @@ public final class ZhongtaiClient: ZhongtaiService {
         }
     }
 
+    /// 【文档 §8.3·server 日志修复】数盟 ID 上报：登录后调用。
+    /// 有真实 CDID → 上报真实值并写请求头 digitalUnionId；取不到 → 跳过（不再发
+    /// "none" 占位刷成功假象，等下次触发条件重试）。
+    /// 文档要求「本地记录这个上报成功，下次判断未上报&数盟ID不一致再上传」。
     public func reportDigitalUnion() async throws {
-        // 工厂无数盟 SDK：无真实 cdid 时不发（上游要求请求头带 userId 且 body 为数组形态）。
-        // 接口契约保留：数盟 ID 取到后按 [{key, val}] 数组上报 updateFields。
         guard userId != nil else {
             Log.warn("[Zhongtai] userId 未就绪，数盟 ID 上报跳过（上游要求请求头带 userId）")
             return
         }
+        // 取真实 CDID（壳层数盟 SDK 有界超时取号）
+        let cdid = await digitalUnionProvider?()
+        guard let cdid, !cdid.isEmpty else {
+            Log.warn("[DU上报] CDID 未就绪，跳过本次上报（待下个触发条件）")
+            return
+        }
+        // 上报成功：缓存写请求头（后续所有接口自动带真实值）
         try await postVoid("/api/v1/device/union",
-                           data: [["key": "digital_union_id", "val": "none"]])
+                           data: [["key": "digital_union_id", "val": cdid]])
+        digitalUnionId = cdid
+        Log.info("[DU上报] 真实 CDID 已上报并写请求头: \(cdid)")
     }
 
     // MARK: - 2. 统计
 
     public func reportBehavior(code: Int, value: Int) async throws {
+        Log.info("[Zhongtai] → 锚点 code=\(code) value=\(value)")
         try await postVoid("/api/v1/action/report", data: ["code": code, "value": value])
     }
 
     public func reportEvent(name: String, params: [String: Any]) async throws {
+        Log.info("[Zhongtai] → 事件 \(name) params=\(params)")
         try await postVoid("/api/v1/telemetry/event", data: ["eventName": name, "params": params])
     }
 
     public func reportEventBatch(_ sensorList: [[String: Any]]) async throws {
+        Log.info("[Zhongtai] → 批量事件 \(sensorList.count) 条")
         try await postVoid("/api/v1/telemetry/event/batch", data: ["sensorList": sensorList])
     }
 
     public func setProfile(params: [String: Any], create: Bool) async throws {
+        Log.info("[Zhongtai] → 用户属性 profile（create=\(create)）params=\(params)")
         try await postVoid("/api/v1/telemetry/profile", data: ["params": params, "create": create])
+    }
+
+    /// 【文档 8.6.3·server 日志修复】登录成功后上报一次基础用户属性（幂等，可覆盖）。
+    /// 属性口径对齐神策公共属性（§6）：平台/系统版本/app 版本/首启时间/渠道。
+    /// 失败静默（链路加法项，不影响主流程）。
+    public func reportUserProfileOnce() async {
+        let params: [String: Any] = [
+            "xm_os": "iOS",
+            "xm_os_version": UIDevice.current.systemVersion,
+            "app_version_name": appVersion,
+            "app_version": appVersionCode,
+            "s_channel": String(config.channel),
+            "cur_channel": String(config.channel),
+            "first_launch_time": Self.installTimeMillis,
+        ]
+        try? await setProfile(params: params, create: false)
     }
 
     // MARK: - 3. IAP
@@ -318,13 +392,18 @@ public final class ZhongtaiClient: ZhongtaiService {
         try await postVoid("/api/v1/store/restore", data: data)
     }
 
-    public func iapVerify(receiptData: String, transactionId: String, orderId: String?, isSandbox: Bool) async throws {
+    public func iapVerify(receiptData: String, transactionId: String, orderId: String?, isSandbox: Bool,
+                          amount: String? = nil, currency: String? = nil,
+                          promotionAmount: String? = nil) async throws {
         let data = IAPVerificationPayload.make(
             receiptData: receiptData,
             transactionId: transactionId,
             orderId: orderId,
             userId: userId,
-            isSandbox: isSandbox
+            isSandbox: isSandbox,
+            amount: amount,
+            currency: currency,
+            promotionAmount: promotionAmount
         )
         try await postVoid("/api/v1/store/verify", data: data)
     }
@@ -380,7 +459,8 @@ public final class ZhongtaiClient: ZhongtaiService {
     static let sdkVersionCode = 3065
 
     /// 首次启动时间（毫秒）：iOS 不暴露真实安装时间，用首次启动近似（归因 installTime 用）。
-    private static let installTimeMillis: Int64 = {
+    /// 首启时间（毫秒；落盘一次。归因 installTime 与锚点窗口共用）
+    public static let installTimeMillis: Int64 = {
         let key = "zhongtai.installTime"
         if let existing = UserDefaults.standard.object(forKey: key) as? Int64 { return existing }
         let fresh = Int64(Date().timeIntervalSince1970 * 1000)

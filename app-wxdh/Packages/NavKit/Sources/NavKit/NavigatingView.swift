@@ -1,10 +1,11 @@
 import CoreLocation
 import SwiftUI
 
-/// 导航中：真实跟随、下一动作、时距、语音、退出（NAV-22/23/27/34）
+/// 导航中：官方 AMapNaviView 全屏渲染 + 自研状态横幅（时距/重算/信号弱）
 struct NavigatingView: View {
     @ObservedObject var model: NavAppModel
     @ObservedObject private var engine: NavEngine
+    @ObservedObject private var navi = NaviService.shared
 
     init(model: NavAppModel) {
         self.model = model
@@ -13,10 +14,10 @@ struct NavigatingView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            NavMapView(controller: model.mapController,
-                       satellite: false,
-                       showsUserLocation: true) {
-                engine.setFollowing(false)
+            // 官方导航视图：路线渲染/车标/跟随镜头全由 SDK 负责
+            AMapNaviViewContainer(kind: modeKind) { view in
+                // 挂载即注册数据通道（算路已配置 manager，这里补视图）
+                navi.configure(kind: modeKind, naviView: view)
             }
             .ignoresSafeArea()
 
@@ -24,7 +25,7 @@ struct NavigatingView: View {
                 maneuverBanner
                 if engine.isWeakLocation {
                     statusChip("定位信号较弱，正在重新获取", color: NavTheme.warn)
-                } else if case .rerouting = engine.phase {
+                } else if navi.isRecalculating {
                     statusChip("正在重新规划路线…", color: NavTheme.accent)
                 }
                 Spacer(minLength: 0)
@@ -38,11 +39,8 @@ struct NavigatingView: View {
                 VStack {
                     Spacer()
                     Button {
-                        if let snap = model.location.snapshot {
-                            model.mapController.follow(snap.place.gcj02Coordinate,
-                                                       heading: snap.course >= 0 ? snap.course : nil)
-                            engine.setFollowing(true)
-                        }
+                        navi.lockCamera()
+                        engine.setFollowing(true)
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "location.fill")
@@ -60,35 +58,21 @@ struct NavigatingView: View {
                 }
             }
         }
-        .onChange(of: model.location.snapshot) { snap in
-            guard let snap, engine.isFollowing else { return }
-            // 镜头随有效行进方向；朝向不可靠时沿用上一次镜头朝向（NAV-22）
-            let heading = snap.course >= 0 && snap.speed > 1 ? snap.course : nil
-            model.mapController.follow(snap.place.gcj02Coordinate, heading: heading)
-        }
-        .onAppear {
-            // 进入导航即近距跟随（不从全览开始），并保证新地图视图重绘路线
-            if let snap = model.location.snapshot, engine.isFollowing {
-                model.mapController.follow(snap.place.gcj02Coordinate,
-                                           heading: snap.course >= 0 && snap.speed > 1 ? snap.course : nil,
-                                           animated: false)
-            }
-        }
-        .onChange(of: engine.currentStepIndex) { _ in
-            // 步骤推进后按新路线重新绘制（重算后 routeId 已变）
-            if let route = engine.selectedRoute {
-                model.mapController.showRoute(route.polyline,
-                                              origin: engine.session?.origin,
-                                              destination: engine.session?.destination)
-            }
+        .onDisappear {
+            // 离开导航页：解除视图数据通道并销毁单例（官方 dealloc 规范）
+            navi.teardown()
         }
     }
 
-    // MARK: - 下一动作
+    private var modeKind: NaviViewKind {
+        engine.session?.mode.naviKind ?? .drive
+    }
+
+    // MARK: - 下一动作横幅（数据来自官方 updateNaviInfo）
 
     private var maneuverBanner: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: maneuverIcon)
+            Image(systemName: engine.maneuverIconName)
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
@@ -100,7 +84,7 @@ struct NavigatingView: View {
                      : "现在")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(NavTheme.ink)
-                Text(engine.nextStep?.instruction ?? "沿当前道路继续前行")
+                Text(engine.maneuverText)
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(NavTheme.inkSoft)
                     .lineLimit(2)
@@ -126,7 +110,7 @@ struct NavigatingView: View {
         .background(NavTheme.panel.opacity(0.96), in: Capsule())
     }
 
-    // MARK: - 底部
+    // MARK: - 底部（剩余时距来自官方 liveInfo 镜像）
 
     private var bottomBar: some View {
         VStack(spacing: 10) {
@@ -184,19 +168,6 @@ struct NavigatingView: View {
         .background(NavTheme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.15), radius: 14, y: 2)
     }
-
-    private var maneuverIcon: String {
-        let text = engine.nextStep?.instruction ?? ""
-        if text.contains("左") && text.contains("前") { return "arrow.up.left" }
-        if text.contains("右") && text.contains("前") { return "arrow.up.right" }
-        if text.contains("左") { return "arrow.turn.up.left" }
-        if text.contains("右") { return "arrow.turn.up.right" }
-        if text.contains("掉头") { return "arrow.uturn.left" }
-        if text.contains("环岛") { return "arrow.triangle.turn.up.right.circle" }
-        if text.contains("到达") { return "flag.checkered" }
-        if text.contains("楼梯") || text.contains("过街") { return "figure.walk" }
-        return "arrow.up"
-    }
 }
 
 /// 正常到达完成页（NAV-35/36）
@@ -237,38 +208,26 @@ struct ArrivalView: View {
                     }
                     .padding(18)
                     .frame(maxWidth: .infinity)
-                    .navCard()
+                    .background(NavTheme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-            }
-            .padding(.horizontal, 24)
 
-            Spacer()
-
-            VStack(spacing: 10) {
-                NavPrimaryButton(title: "完成", systemImage: "checkmark") {
+                NavPrimaryButton(title: "完成",
+                                 systemImage: "checkmark",
+                                 enabled: true,
+                                 loading: false) {
                     model.finishArrival()
                 }
-                Button {
-                    model.planAgain()
-                } label: {
-                    Text("再去此处")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(NavTheme.accentDeep)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                }
-                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 24)
+            .padding(24)
+            Spacer()
         }
-        .background(NavTheme.bg.ignoresSafeArea())
+        .background(NavTheme.bg)
     }
 
     private func statItem(title: String, value: String) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 4) {
             Text(value)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(NavTheme.ink)
             Text(title)
                 .font(.system(size: 11))

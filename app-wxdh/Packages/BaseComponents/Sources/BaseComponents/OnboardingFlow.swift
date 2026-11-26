@@ -123,23 +123,32 @@ struct AssetMedia: View {
 public struct SplashView: View {
     let image: String
     let theme: any ThemeService
+    /// 【Bug 行24】图→视频切换的水平位移补偿：视频层呈现与 PNG 解码路径存在细微
+    /// 取整差异，用户实测画面向左跳。给静态图加 x 偏移对齐视频实际呈现位置。
+    var offsetX: CGFloat = 0
 
-    public init(image: String, theme: any ThemeService) {
+    public init(image: String, theme: any ThemeService, offsetX: CGFloat = 0) {
         self.image = image
         self.theme = theme
+        self.offsetX = offsetX
     }
 
     public var body: some View {
         ZStack {
             AssetImage(path: image)
                 .ignoresSafeArea()
+                .offset(x: offsetX)
         }
         .background(theme.colors.bgPage)
     }
 }
 
 /// 开机视频页：紧跟开机图之后播放，播完触发回调淡出，做出动态启动页效果。
-/// 与 LaunchScreen 的静态 splash 图无缝拼接：图淡出即视频铺满开始播放。
+///
+/// 【闪白修复】本视图**不铺自己的背景色**：父层是常驻的开机图，视频层在首帧
+/// 解码就绪前保持透明，此时露出的仍是开机图，不会出现「图已淡出、视频首帧
+/// 还没到」之间那一整帧白底。此前这里铺了 `theme.colors.bgPage`（浅色），
+/// 且 player 一创建就把 AVPlayerLayer 插入视图树（layer 尚无画面）→ 白闪。
 public struct SplashVideoView: View {
     let path: String                     // assets 相对路径（如 assets/splash.mp4）
     let theme: any ThemeService
@@ -155,8 +164,8 @@ public struct SplashVideoView: View {
 
     public var body: some View {
         ZStack {
-            theme.colors.bgPage.ignoresSafeArea()
-            if let player = playerHolder.player {
+            // 只有首帧就绪后才插入视频 layer；未就绪时整层透明，由父层开机图兜底
+            if playerHolder.isReady, let player = playerHolder.player {
                 PlayerLayerView(player: player)
                     .ignoresSafeArea()
                     .onAppear { playerHolder.play() }
@@ -167,29 +176,56 @@ public struct SplashVideoView: View {
     }
 }
 
-/// 持有 AVPlayer（避免 View 重建导致播放中断）+ 监听播放结束。
+/// 持有 AVPlayer（避免 View 重建导致播放中断）+ 首帧预热 + 监听播放结束。
 private final class PlayerHolder: ObservableObject {
     @Published var player: AVPlayer?
+    /// 首帧已解码、可以把 layer 上屏（未就绪前保持透明，露出父层开机图）
+    @Published private(set) var isReady = false
     private var endObserver: NSObjectProtocol?
+    private var statusObservation: NSKeyValueObservation?
+    private var readyFallback: DispatchWorkItem?
     private var finished = false
 
     func load(path: String, onFinish: @escaping () -> Void) {
         guard let url = Bundle.main.resourceURL?.appendingPathComponent(path) else {
             onFinish(); return
         }
-        let player = AVPlayer(url: url)
+        let item = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
         player.isMuted = true
         // 静音播放不抢占音频会话，符合开机过渡的预期
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: .mixWithOthers)
         // 播放结束通知 → 回调（仅触发一次，防 didEnd 多次）
         endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
         ) { [weak self] _ in
             guard let self, !self.finished else { return }
             self.finished = true
             onFinish()
         }
         self.player = player
+
+        // 首帧预热：item 就绪 → preroll 解码当前帧 → 才允许 layer 上屏。
+        // 避免 AVPlayerLayer 在无可显示帧时以透明/黑底盖住开机图。
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] observed, _ in
+            guard observed.status == .readyToPlay else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isReady else { return }
+                player.preroll(atRate: 1.0) { _ in
+                    DispatchQueue.main.async { [weak self] in self?.markReady() }
+                }
+            }
+        }
+        // 兜底：2s 内仍未就绪也放行，避免极端慢解码/损坏视频把启动序列卡死在静态图
+        let fallback = DispatchWorkItem { [weak self] in self?.markReady() }
+        readyFallback = fallback
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: fallback)
+    }
+
+    private func markReady() {
+        guard !isReady else { return }
+        readyFallback?.cancel()
+        isReady = true
     }
 
     func play() {
@@ -199,6 +235,8 @@ private final class PlayerHolder: ObservableObject {
 
     func teardown() {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        statusObservation?.invalidate()
+        readyFallback?.cancel()
         player?.pause()
         player = nil
     }
@@ -259,9 +297,10 @@ public struct OnboardingFlow: View {
     }
 
     private func pageView(_ image: String) -> some View {
-        // 需求 05：三张独立实景，顶部只保留页码、主标题与说明靠下；全部「下一步」，2/3 有「上一步」。
-        // 图内已烘入页码（顶部）与标题/说明（底部），故此处不再叠加页码点阵；
-        // 背景通到手机顶部（ignoresSafeArea），不保留状态栏区域的白条。
+        // 需求 05：三张独立实景，顶部只保留主标题与说明靠下；全部「下一步」，2/3 有「上一步」。
+        // 【页码移除】素材图右上角烘入的「01/03」白色页码已直接从 PNG 擦除
+        // （左右背景色横向渐变修补），无需代码遮块；左下角页码点阵同样不再需要——
+        // 按需求整页无页码指示。
         GeometryReader { geo in
             ZStack(alignment: .bottom) {
                 // 背景层：引导图/视频铺满全屏含安全区（mp4 自动循环播放，作动态背景）

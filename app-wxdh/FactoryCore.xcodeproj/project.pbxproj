@@ -9,26 +9,35 @@
 /* Begin PBXBuildFile section */
 		044F5228573C3FF686AA87FD /* Capabilities in Frameworks */ = {isa = PBXBuildFile; productRef = A817CD8E9511CFFB986F0396 /* Capabilities */; };
 		051645EDB1103A0BA72748CE /* spec.json in Resources */ = {isa = PBXBuildFile; fileRef = 401BF06EE0A2E44336BCDF1C /* spec.json */; };
+		314C7B8F0966EB868E5910B2 /* AMap.bundle in Resources */ = {isa = PBXBuildFile; fileRef = E991C701A012FB9D98ADF9B0 /* AMap.bundle */; };
+		31A5B0CFE9ADB6FE0BDFB949 /* AMapFoundationKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D72D5219EEDD51FA5E3AAC0D /* AMapFoundationKit.xcframework */; };
 		336A6416EF4AF4CE0A255C18 /* DateUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9678CC45E481EF6083D55CD9 /* DateUtil.swift */; };
 		40BCD23B05C9BB301B0B9EE5 /* catalog.json in Resources */ = {isa = PBXBuildFile; fileRef = D1260E783552432AADAF462F /* catalog.json */; };
+		479DD49C13C04F78D0289B1A /* AMapNaviKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9FE616A39B4BDA9AF37CE6B7 /* AMapNaviKit.xcframework */; };
 		4FA1E3FFC8F2295A950082BE /* FormatHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67A070B574C4D6ED76D6B81C /* FormatHelper.swift */; };
 		579C18DFF050E30C846D37C0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 75A1DA93BB43F5FAE859C5CC /* Assets.xcassets */; };
 		586F4E61AAF9960E7988A811 /* ShellRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 604AE856C00AE4A71E6A5F3F /* ShellRootView.swift */; };
 		5C9E353209F1481331C1405E /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = E67DDFA684800A61AD2EF506 /* Themes */; };
+		6F258DE71FCB2CC80EB17391 /* AMapSearchKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = DBC8CBDBD985DD0D69BD8DA6 /* AMapSearchKit.xcframework */; };
 		8641456B2B9AF9493AC90142 /* AppSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33292DED9E150D3BA35CA61E /* AppSpec.swift */; };
 		96199C02E58D9DB7C9E16B56 /* FactoryApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16BBC19FA488DFC709B5BDAA /* FactoryApp.swift */; };
+		995B4EC87731BCB34D2FD9E9 /* DigitalUnionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 080D98878D2308515FFBE001 /* DigitalUnionService.swift */; };
 		A3AA61FEF95401CDD0AA5170 /* PluginRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9856BDC7A72048FF2F555193 /* PluginRegistry.swift */; };
 		A4CD1A41197112922ECF91C9 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 9DA3EE51B6E974507BDB5777 /* assets */; };
 		A57A3FF556CB31CC34766E32 /* theme-packs in Resources */ = {isa = PBXBuildFile; fileRef = 558E6EBCCD4C9931D83AAF4B /* theme-packs */; };
 		C95EF26746D5B71EA1C87D3E /* NavKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9D2673DF5988BCFABEBF8EBB /* NavKit */; };
+		CB3AE8FB39761BA29A1D2A17 /* AMapNavi.bundle in Resources */ = {isa = PBXBuildFile; fileRef = C86D33AB45A33D7D2E94CBB1 /* AMapNavi.bundle */; };
+		CE26485AD781C7BB3981926E /* GDTConversionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0FC39DF938F41931642B33D /* GDTConversionService.swift */; };
 		D34705EE5E82D0896660A710 /* CoreKit in Frameworks */ = {isa = PBXBuildFile; productRef = B089065E878889D5F1A4A6DD /* CoreKit */; };
 		D73BEFBB6A7A5D8DA4BC1836 /* BaseComponents in Frameworks */ = {isa = PBXBuildFile; productRef = F70E479DEC400C2195BEDB2B /* BaseComponents */; };
+		EBF27F0253A5060CF42FC009 /* DigitalUnionSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 931D9F1E80BA1A3D6175D5D8 /* DigitalUnionSDK */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		080D98878D2308515FFBE001 /* DigitalUnionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigitalUnionService.swift; sourceTree = "<group>"; };
 		16BBC19FA488DFC709B5BDAA /* FactoryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactoryApp.swift; sourceTree = "<group>"; };
-		1DD46328F5C962D8A522C116 /* Products.storekit */ = {isa = PBXFileReference; path = Products.storekit; sourceTree = "<group>"; };
 		2731E15D308781546DBB24DD /* Capabilities */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Capabilities; path = Packages/Capabilities; sourceTree = SOURCE_ROOT; };
+		2D716008FFD5D8A05D729507 /* DigitalUnion */ = {isa = PBXFileReference; lastKnownFileType = folder; name = DigitalUnion; path = Packages/Integrations/DigitalUnion; sourceTree = SOURCE_ROOT; };
 		33292DED9E150D3BA35CA61E /* AppSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSpec.swift; sourceTree = "<group>"; };
 		374C1BCB2150DAB7A778A3A2 /* CoreKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CoreKit; path = Packages/CoreKit; sourceTree = SOURCE_ROOT; };
 		401BF06EE0A2E44336BCDF1C /* spec.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = spec.json; sourceTree = "<group>"; };
@@ -41,9 +50,15 @@
 		9856BDC7A72048FF2F555193 /* PluginRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistry.swift; sourceTree = "<group>"; };
 		9C994F39CF5D619402CB6906 /* BaseComponents */ = {isa = PBXFileReference; lastKnownFileType = folder; name = BaseComponents; path = Packages/BaseComponents; sourceTree = SOURCE_ROOT; };
 		9DA3EE51B6E974507BDB5777 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = assets; path = Resources/assets; sourceTree = SOURCE_ROOT; };
-		ACE980FA606F6745E183D7A3 /* FactoryCore.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FactoryCore.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9FE616A39B4BDA9AF37CE6B7 /* AMapNaviKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = AMapNaviKit.xcframework; path = Vendor/AMap/AMapNaviKit.xcframework; sourceTree = "<group>"; };
+		ACE980FA606F6745E183D7A3 /* 智能卫星定位.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "智能卫星定位.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0FC39DF938F41931642B33D /* GDTConversionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GDTConversionService.swift; sourceTree = "<group>"; };
+		C86D33AB45A33D7D2E94CBB1 /* AMapNavi.bundle */ = {isa = PBXFileReference; lastKnownFileType = wrapper.cfbundle; path = AMapNavi.bundle; sourceTree = "<group>"; };
 		D1260E783552432AADAF462F /* catalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = catalog.json; sourceTree = "<group>"; };
+		D72D5219EEDD51FA5E3AAC0D /* AMapFoundationKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = AMapFoundationKit.xcframework; path = Vendor/AMap/AMapFoundationKit.xcframework; sourceTree = "<group>"; };
+		DBC8CBDBD985DD0D69BD8DA6 /* AMapSearchKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = AMapSearchKit.xcframework; path = Vendor/AMap/AMapSearchKit.xcframework; sourceTree = "<group>"; };
 		E67DDFA684800A61AD2EF506 /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Themes; path = Resources/Themes; sourceTree = SOURCE_ROOT; };
+		E991C701A012FB9D98ADF9B0 /* AMap.bundle */ = {isa = PBXFileReference; lastKnownFileType = wrapper.cfbundle; path = AMap.bundle; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,6 +70,10 @@
 				044F5228573C3FF686AA87FD /* Capabilities in Frameworks */,
 				D73BEFBB6A7A5D8DA4BC1836 /* BaseComponents in Frameworks */,
 				C95EF26746D5B71EA1C87D3E /* NavKit in Frameworks */,
+				EBF27F0253A5060CF42FC009 /* DigitalUnionSDK in Frameworks */,
+				31A5B0CFE9ADB6FE0BDFB949 /* AMapFoundationKit.xcframework in Frameworks */,
+				479DD49C13C04F78D0289B1A /* AMapNaviKit.xcframework in Frameworks */,
+				6F258DE71FCB2CC80EB17391 /* AMapSearchKit.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,11 +89,23 @@
 			path = Utils;
 			sourceTree = "<group>";
 		};
+		15AD1BD16E78855A43F1E702 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D72D5219EEDD51FA5E3AAC0D /* AMapFoundationKit.xcframework */,
+				9FE616A39B4BDA9AF37CE6B7 /* AMapNaviKit.xcframework */,
+				DBC8CBDBD985DD0D69BD8DA6 /* AMapSearchKit.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		7860AECC77A63FB83B46169F /* Sources */ = {
 			isa = PBXGroup;
 			children = (
 				33292DED9E150D3BA35CA61E /* AppSpec.swift */,
+				080D98878D2308515FFBE001 /* DigitalUnionService.swift */,
 				16BBC19FA488DFC709B5BDAA /* FactoryApp.swift */,
+				B0FC39DF938F41931642B33D /* GDTConversionService.swift */,
 				9856BDC7A72048FF2F555193 /* PluginRegistry.swift */,
 				604AE856C00AE4A71E6A5F3F /* ShellRootView.swift */,
 				0BF8B8999F338249D05889E2 /* Utils */,
@@ -85,9 +116,19 @@
 		7DA23C2CBE1AD814EDB4D7BD /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				ACE980FA606F6745E183D7A3 /* FactoryCore.app */,
+				ACE980FA606F6745E183D7A3 /* 智能卫星定位.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		AE21D516A750A548C436DC99 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				E991C701A012FB9D98ADF9B0 /* AMap.bundle */,
+				C86D33AB45A33D7D2E94CBB1 /* AMapNavi.bundle */,
+			);
+			name = Resources;
+			path = Vendor/AMap/Resources;
 			sourceTree = "<group>";
 		};
 		B1525EFE34B30058E8C734A8 = {
@@ -98,7 +139,9 @@
 				E67DDFA684800A61AD2EF506 /* Themes */,
 				FE19FEB9FF44878CCB69AAC2 /* Packages */,
 				DD925AF25D88465732936B87 /* Resources */,
+				AE21D516A750A548C436DC99 /* Resources */,
 				7860AECC77A63FB83B46169F /* Sources */,
+				15AD1BD16E78855A43F1E702 /* Frameworks */,
 				7DA23C2CBE1AD814EDB4D7BD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -108,7 +151,6 @@
 			children = (
 				75A1DA93BB43F5FAE859C5CC /* Assets.xcassets */,
 				D1260E783552432AADAF462F /* catalog.json */,
-				1DD46328F5C962D8A522C116 /* Products.storekit */,
 				401BF06EE0A2E44336BCDF1C /* spec.json */,
 			);
 			path = Resources;
@@ -120,6 +162,7 @@
 				9C994F39CF5D619402CB6906 /* BaseComponents */,
 				2731E15D308781546DBB24DD /* Capabilities */,
 				374C1BCB2150DAB7A778A3A2 /* CoreKit */,
+				2D716008FFD5D8A05D729507 /* DigitalUnion */,
 				4A2EF15FD41FC49D0C1323B7 /* NavKit */,
 			);
 			path = Packages;
@@ -146,9 +189,10 @@
 				A817CD8E9511CFFB986F0396 /* Capabilities */,
 				F70E479DEC400C2195BEDB2B /* BaseComponents */,
 				9D2673DF5988BCFABEBF8EBB /* NavKit */,
+				931D9F1E80BA1A3D6175D5D8 /* DigitalUnionSDK */,
 			);
 			productName = FactoryCore;
-			productReference = ACE980FA606F6745E183D7A3 /* FactoryCore.app */;
+			productReference = ACE980FA606F6745E183D7A3 /* 智能卫星定位.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -159,11 +203,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-					E2DBB0BE28C64DCF66C159CB = {
-						DevelopmentTeam = 363GQLCMXG;
-					};
-				};
 			};
 			buildConfigurationList = AA985F0815AB2A049D1CFFF7 /* Build configuration list for PBXProject "FactoryCore" */;
 			developmentRegion = en;
@@ -178,6 +217,7 @@
 				E8569A24BDD604E52F7CB67A /* XCLocalSwiftPackageReference "Packages/BaseComponents" */,
 				9E3D284433F535776471E12F /* XCLocalSwiftPackageReference "Packages/Capabilities" */,
 				7CCC55A0075B4F041FF8F37C /* XCLocalSwiftPackageReference "Packages/CoreKit" */,
+				B9E9CB71F4771713E42FE031 /* XCLocalSwiftPackageReference "Packages/Integrations/DigitalUnion" */,
 				6E5CEB75134A89BCF17B7516 /* XCLocalSwiftPackageReference "Packages/NavKit" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -195,6 +235,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				314C7B8F0966EB868E5910B2 /* AMap.bundle in Resources */,
+				CB3AE8FB39761BA29A1D2A17 /* AMapNavi.bundle in Resources */,
 				579C18DFF050E30C846D37C0 /* Assets.xcassets in Resources */,
 				5C9E353209F1481331C1405E /* Themes in Resources */,
 				A4CD1A41197112922ECF91C9 /* assets in Resources */,
@@ -213,8 +255,10 @@
 			files = (
 				8641456B2B9AF9493AC90142 /* AppSpec.swift in Sources */,
 				336A6416EF4AF4CE0A255C18 /* DateUtil.swift in Sources */,
+				995B4EC87731BCB34D2FD9E9 /* DigitalUnionService.swift in Sources */,
 				96199C02E58D9DB7C9E16B56 /* FactoryApp.swift in Sources */,
 				4FA1E3FFC8F2295A950082BE /* FormatHelper.swift in Sources */,
+				CE26485AD781C7BB3981926E /* GDTConversionService.swift in Sources */,
 				A3AA61FEF95401CDD0AA5170 /* PluginRegistry.swift in Sources */,
 				586F4E61AAF9960E7988A811 /* ShellRootView.swift in Sources */,
 			);
@@ -233,21 +277,28 @@
 		4BEAC1E773A5894DD05107FF /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = dwarf;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 363GQLCMXG;
 				ENABLE_TESTABILITY = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Vendor/AMap\"",
+				);
 				INFOPLIST_FILE = "FactoryCore-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.0.2;
 				ONLY_ACTIVE_ARCH = YES;
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
+					"-ObjC",
+					"-lresolv",
+					"$(SRCROOT)/Vendor/GDT/libGDTActionSDK.a",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.hxwl.wxdh;
 				PRODUCT_NAME = "智能卫星定位";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_COMPILATION_MODE = wholemodule;
+				"SWIFT_INCLUDE_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/Vendor/GDT";
 				SWIFT_OPTIMIZATION_LEVEL = "-Osize";
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -264,18 +315,25 @@
 		DFB268E8EC8BC70283E5B01F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 363GQLCMXG;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Vendor/AMap\"",
+				);
 				INFOPLIST_FILE = "FactoryCore-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 1.0.0;
-				ONLY_ACTIVE_ARCH = NO;
+				MARKETING_VERSION = 1.0.2;
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
+					"-ObjC",
+					"-lresolv",
+					"$(SRCROOT)/Vendor/GDT/libGDTActionSDK.a",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.hxwl.wxdh;
 				PRODUCT_NAME = "智能卫星定位";
 				SWIFT_COMPILATION_MODE = wholemodule;
+				"SWIFT_INCLUDE_PATHS[sdk=iphoneos*]" = "$(SRCROOT)/Vendor/GDT";
 				SWIFT_OPTIMIZATION_LEVEL = "-Osize";
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -318,6 +376,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Capabilities;
 		};
+		B9E9CB71F4771713E42FE031 /* XCLocalSwiftPackageReference "Packages/Integrations/DigitalUnion" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Integrations/DigitalUnion;
+		};
 		E8569A24BDD604E52F7CB67A /* XCLocalSwiftPackageReference "Packages/BaseComponents" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/BaseComponents;
@@ -325,6 +387,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		931D9F1E80BA1A3D6175D5D8 /* DigitalUnionSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DigitalUnionSDK;
+		};
 		9D2673DF5988BCFABEBF8EBB /* NavKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = NavKit;

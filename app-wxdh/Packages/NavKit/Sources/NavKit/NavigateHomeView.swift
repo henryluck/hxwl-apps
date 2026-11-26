@@ -8,6 +8,8 @@ import SwiftUI
 struct NavigateHomeView: View {
     @ObservedObject var model: NavAppModel
     @State private var showTools = false
+    /// 【R-073-02】首页停车卡直达详情：sheet 弹出时指定工具页初始路由
+    @State private var initialToolsRoute: TravelToolsScreen.Route?
     @State private var showSavedPlaces = false
     @State private var showLayerPicker = false
 
@@ -37,7 +39,7 @@ struct NavigateHomeView: View {
             .padding(.top, 8)
         }
         .sheet(isPresented: $showTools) {
-            TravelToolsScreen(model: model)
+            TravelToolsScreen(model: model, initialRoute: initialToolsRoute)
         }
         .sheet(isPresented: $showSavedPlaces) {
             SavedPlacesScreen(model: model)
@@ -57,6 +59,11 @@ struct NavigateHomeView: View {
                     latitudinalMeters: 4000, longitudinalMeters: 4000))
             }
         }
+        .onAppear {
+            // 【Bug 行43·行51】首页地图不承载规划线：规划/导航残留的 overlay 一律清掉
+            // （此前导航结束切 tab 回首页会看到上次导航线路）
+            model.mapController.clearRoute()
+        }
     }
 
     // MARK: - 顶部：大标题 + 「我的 / 会员」胶囊
@@ -69,51 +76,7 @@ struct NavigateHomeView: View {
                 .foregroundStyle(Color(hex: "1E4D38"))
                 .shadow(color: .white.opacity(0.95), radius: 8)
             Spacer(minLength: 0)
-            HStack(spacing: 0) {
-                Button {
-                    model.showProfile = true
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("我的")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    .foregroundStyle(Color(hex: "1E5038"))
-                    .frame(height: 42)
-                    .padding(.horizontal, 10)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("我的")
-
-                Rectangle()
-                    .fill(Color(hex: "D7E7DD"))
-                    .frame(width: 1, height: 17)
-
-                Button {
-                    if model.isUnlocked {
-                        model.showProfile = true
-                    } else {
-                        model.requireMembership()
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "crown.fill")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color(hex: "E9A51B"))
-                        Text("会员")
-                            .font(.system(size: 15, weight: .bold))
-                    }
-                    .foregroundStyle(Color(hex: "B45418"))
-                    .frame(height: 42)
-                    .padding(.horizontal, 10)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(model.isUnlocked ? "会员中心" : "开通会员")
-            }
-            .background(Color.white, in: Capsule())
-            .overlay(Capsule().stroke(Color(hex: "DCEBE1"), lineWidth: 1))
-            .shadow(color: Color(hex: "214B34").opacity(0.14), radius: 12, y: 4)
+            AccountMemberCapsule(model: model, height: 42)
         }
         .padding(.horizontal, 18)
         .padding(.top, 6)
@@ -148,13 +111,66 @@ struct NavigateHomeView: View {
     }
 
     private var shortcuts: some View {
-        HStack(spacing: 10) {
-            shortcutChip(icon: "bookmark", title: "常用地点") { showSavedPlaces = true }
-            shortcutChip(icon: "wrench.and.screwdriver.fill", title: "出行工具") { showTools = true }
-            Spacer(minLength: 0)
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                shortcutChip(icon: "bookmark", title: "常用地点") { showSavedPlaces = true }
+                shortcutChip(icon: "wrench.and.screwdriver.fill", title: "出行工具") { showTools = true }
+                Spacer(minLength: 0)
+            }
+            // 【R-073-01/03】保存停车后首页显示精简卡——受记录的 homeVisible 开关控制
+            // （新建默认开；详情关闭后立即消失、开启立即恢复；无定时自动隐藏）
+            if let parking = model.stores.parking, parking.homeVisible {
+                parkingSummary(parking)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
+    }
+
+    /// 停车摘要卡：点击进入**同一条便签详情**（R-073-02）
+    private func parkingSummary(_ parking: NavStores.ParkingNote) -> some View {
+        Button {
+            // R-073-02：直达详情（记录已被删除/读取失败时走工具空态——详情页自处理）
+            initialToolsRoute = .parkingNote
+            showTools = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "parkingsign.circle.fill")
+                    .font(.system(size: 26))
+                    .foregroundStyle(NavTheme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    let display = parking.note.trimmingCharacters(in: .whitespaces)
+                    Text(display.isEmpty ? "已拍下停车位置" : display)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(NavTheme.ink)
+                        .lineLimit(1)
+                    Text(parking.createdAt.map { "停车于 \(NavFormat.clock($0))" } ?? "时间未记录")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NavTheme.inkMute)
+                }
+                Spacer(minLength: 0)
+                if let data = parking.imageData,
+                   let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 40, height: 40)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(NavTheme.inkMute)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 56)
+            .frame(maxWidth: .infinity)
+            .background(Color.white.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(hex: "E1EEE5"), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("停车记录摘要，点按查看")
     }
 
     private func shortcutChip(icon: String, title: String,
